@@ -10,7 +10,7 @@ from vimgym.storage.writer import (
     upsert_session,
 )
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "-Users-shoaibrain-edforge"
+DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
 def _back_up(tmp_path, name):

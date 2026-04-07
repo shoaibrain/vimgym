@@ -9,7 +9,7 @@ from vimgym.db import init_db
 from vimgym.pipeline.orchestrator import process_session
 from vimgym.server import create_app
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "-Users-shoaibrain-edforge"
+DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
 @pytest.fixture

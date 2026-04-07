@@ -3,7 +3,7 @@ from pathlib import Path
 from vimgym.pipeline.metadata import decode_project_name, extract_metadata
 from vimgym.pipeline.parser import parse_session
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "-Users-shoaibrain-edforge"
+DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
 def test_decode_project_name_from_cwd():

@@ -24,7 +24,7 @@ def _cfg_with_watch(vault: Path, watch: Path, **overrides) -> AppConfig:
         **overrides,
     )
 
-REAL = Path(__file__).parent.parent / "data" / "-Users-shoaibrain-edforge"
+REAL = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
 def test_filter_accepts_session_files():
@@ -47,7 +47,7 @@ def test_filter_rejects_dotfiles():
 
 def test_backfill_processes_existing_files(tmp_path):
     watch = tmp_path / "watch"
-    proj = watch / "-Users-shoaibrain-edforge"
+    proj = watch / "-Users-example-edforge"
     proj.mkdir(parents=True)
     src = REAL / "eaa3009a-c5ab-4015-a3e5-af26622652f9.jsonl"
     shutil.copy(src, proj / src.name)
@@ -71,7 +71,7 @@ def test_backfill_processes_existing_files(tmp_path):
 
 def test_watcher_processes_new_file(tmp_path):
     watch = tmp_path / "watch"
-    proj = watch / "-Users-shoaibrain-edforge"
+    proj = watch / "-Users-example-edforge"
     proj.mkdir(parents=True)
 
     cfg = _cfg_with_watch(
@@ -103,7 +103,7 @@ def test_watcher_processes_new_file(tmp_path):
 
 def test_watcher_debounces_rapid_modifications(tmp_path):
     watch = tmp_path / "watch"
-    proj = watch / "-Users-shoaibrain-edforge"
+    proj = watch / "-Users-example-edforge"
     proj.mkdir(parents=True)
 
     cfg = _cfg_with_watch(

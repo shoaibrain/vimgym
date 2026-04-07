@@ -10,7 +10,7 @@ import pytest
 from vimgym.config import AppConfig, SourceConfig, save_config
 from vimgym.daemon import is_running, start_daemon, stop_daemon
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "-Users-shoaibrain-edforge"
+DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
 def _free_port() -> int:
@@ -22,7 +22,7 @@ def _free_port() -> int:
 @pytest.fixture
 def daemon_cfg(tmp_path):
     watch = tmp_path / "watch"
-    proj = watch / "-Users-shoaibrain-edforge"
+    proj = watch / "-Users-example-edforge"
     proj.mkdir(parents=True)
     # Seed one small session so backfill has work to do.
     src = DATA_DIR / "eaa3009a-c5ab-4015-a3e5-af26622652f9.jsonl"

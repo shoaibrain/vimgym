@@ -87,6 +87,7 @@ case "$INSTALL_METHOD" in
         warn "   vg will not be available until you add it. Add this line"
         warn "   to ~/.zshrc (or ~/.bashrc) and reload your shell:"
         printf '\n'
+        # shellcheck disable=SC2016  # the literal $PATH is what the user must paste
         printf '       export PATH="%s:$PATH"\n' "${USER_BIN}"
         printf '\n'
         warn "   We deliberately do NOT edit your shell config automatically."

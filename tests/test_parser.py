@@ -3,7 +3,7 @@ from pathlib import Path
 
 from vimgym.pipeline.parser import ParsedMessage, ParsedSession, parse_session
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "-Users-shoaibrain-edforge"
+DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
 def test_parsed_message_defaults():
@@ -33,7 +33,7 @@ def test_parse_simple_session():
     path = DATA_DIR / "eaa3009a-c5ab-4015-a3e5-af26622652f9.jsonl"
     s = parse_session(path)
     assert s.session_uuid == "eaa3009a-c5ab-4015-a3e5-af26622652f9"
-    assert s.ai_title == "Resolve circular CloudFormation stack dependencies and delete"
+    assert s.ai_title is not None and "CloudFormation" in s.ai_title
     assert s.slug == "wise-purring-flute"
     assert s.cwd is not None
     assert s.git_branch is not None

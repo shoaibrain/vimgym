@@ -8,7 +8,7 @@ from vimgym.db import init_db
 from vimgym.pipeline.orchestrator import process_session
 from vimgym.server import create_app
 
-DATA_DIR = Path(__file__).parent.parent / "data" / "-Users-shoaibrain-edforge"
+DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
 @pytest.fixture
@@ -46,6 +46,7 @@ def test_session_detail(client):
     assert r.status_code == 200
     body = r.json()
     assert body["session_uuid"] == "eaa3009a-c5ab-4015-a3e5-af26622652f9"
+    assert body["ai_title"] is not None
     assert "CloudFormation" in body["ai_title"]
     assert isinstance(body["messages"], list)
     assert len(body["messages"]) > 0

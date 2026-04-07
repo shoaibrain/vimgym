@@ -62,3 +62,13 @@ jobs:
           name: dist-${{ github.sha }}
           path: dist/
           retention-days: 7
+
+  shellcheck:
+    name: shellcheck install.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint install.sh
+        run: shellcheck install.sh
