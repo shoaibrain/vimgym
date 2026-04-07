@@ -58,6 +58,11 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           print-hash: true
+          # Idempotent: a re-run of the same release tag is a no-op rather
+          # than a hard failure. Lets us recover from post-publish errors
+          # (e.g. asset upload, attestation) without having to burn a
+          # version number.
+          skip-existing: true
 
       - name: Upload artifacts to GitHub Release
         env:
