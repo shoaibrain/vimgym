@@ -3,7 +3,22 @@ from __future__ import annotations
 
 import json
 import re
+from importlib.resources import files
 from pathlib import Path
+
+
+def _load_bundled_defaults() -> dict:
+    """Read the redaction rules bundled inside the installed package.
+
+    Uses importlib.resources so this works correctly when vimgym is installed
+    from a wheel (pip/pipx/Homebrew), not just in editable repo layout.
+    """
+    try:
+        return json.loads(
+            (files("vimgym.defaults") / "redaction-rules.json").read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, ModuleNotFoundError):
+        return {"rules": []}
 
 
 class RedactionEngine:
@@ -12,21 +27,25 @@ class RedactionEngine:
     def __init__(self, rules_path: Path):
         self._patterns: list[tuple[str, re.Pattern[str], str]] = []
         rules_path = Path(rules_path)
-        if not rules_path.exists():
-            # Fall back to bundled defaults if vault rules file is missing.
-            bundled = Path(__file__).resolve().parents[3] / "defaults" / "redaction-rules.json"
-            if bundled.exists():
-                rules_path = bundled
-            else:
-                return
 
-        data = json.loads(rules_path.read_text())
+        if rules_path.exists():
+            try:
+                data = json.loads(rules_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                data = _load_bundled_defaults()
+        else:
+            data = _load_bundled_defaults()
+
         for rule in data.get("rules", []):
             try:
                 compiled = re.compile(rule["pattern"])
-            except re.error:
+            except (re.error, KeyError):
                 continue
             self._patterns.append((rule["name"], compiled, rule["replacement"]))
+
+    @property
+    def rule_count(self) -> int:
+        return len(self._patterns)
 
     def redact_text(self, text: str) -> str:
         if not text:

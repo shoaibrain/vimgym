@@ -35,31 +35,72 @@ It's `git log` for your AI conversations.
 
 ## Installation
 
-### Homebrew (recommended)
+There are four supported install paths. Pick one. After install, run
+`vg doctor` to verify everything is healthy.
+
+### 1. Homebrew (recommended for macOS)
 
 ```bash
+brew tap shoaibrain/vimgym
 brew install vimgym
 ```
 
-### curl (no Homebrew)
+This installs `vg` to `/opt/homebrew/bin/vg` (Apple Silicon) or
+`/usr/local/bin/vg` (Intel) — always on `$PATH`, no shell activation
+required, survives shell restart and reboot. To run as a background
+service that auto-starts on login:
+
+```bash
+brew services start vimgym
+```
+
+### 2. pipx (any OS, recommended for Linux)
+
+```bash
+pipx install vimgym
+```
+
+`pipx` installs vimgym into an isolated virtualenv and symlinks `vg` into
+a PATH directory. Equally permanent as Homebrew, no shell activation needed.
+
+### 3. curl one-liner (auto-detects the best method)
 
 ```bash
 curl -fsSL https://vimgym.xyz/install | sh
 ```
 
-The installer detects Homebrew, pipx, or pip in that order and uses whichever
-is available. It will tell you if `vg` ends up outside your `$PATH`.
+The installer prefers Homebrew, then pipx, then `pip --user`. If it falls
+back to `pip --user` and your PATH does not contain the user bin directory,
+the installer prints the exact line to add to your `~/.zshrc` — it never
+edits your shell config silently.
 
-### pip
+### 4. From source (development install)
 
 ```bash
-pip install --user vimgym
-# If `vg` isn't on PATH after this, add the user bin dir:
-#   export PATH="$(python3 -m site --user-base)/bin:$PATH"
+git clone https://github.com/shoaibrain/vimgym.git
+cd vimgym
+make install
+source .venv/bin/activate
 ```
 
-**Requirements:** macOS, Python 3.11+. Linux works but is not yet covered by
-CI. Windows support is planned for v2.
+This is for contributors. The resulting `vg` lives inside `.venv/bin/`,
+so it only works in shells where the venv is active. If you see a
+`⚠ vg is running from a project virtualenv` warning, that's expected
+for source installs.
+
+### Verify
+
+```bash
+vg --version
+vg doctor
+```
+
+`vg doctor` runs a full system check (Python version, SQLite FTS5,
+vault permissions, configured sources, redaction rules) and exits
+non-zero if anything is wrong.
+
+**Requirements:** macOS or Linux, Python 3.11/3.12/3.13. Windows is not
+yet supported.
 
 ---
 
@@ -338,7 +379,7 @@ editor, then `vg stop && vg start` to apply changes.
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "vault_dir": "/Users/you/.vimgym",
   "server_host": "127.0.0.1",
   "server_port": 7337,
@@ -454,6 +495,18 @@ docs](DEVELOPER.md#redaction-rules-reference).
 ---
 
 ## Troubleshooting
+
+### Anything looks wrong → `vg doctor`
+
+Always start here:
+
+```bash
+vg doctor
+```
+
+It checks Python, SQLite FTS5, vault permissions, the daemon state,
+every configured source, and the redaction rules. If a green ✓ becomes
+a red ✗, the line right after it tells you how to fix it.
 
 ### `vg start` fails immediately
 

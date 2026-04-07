@@ -31,6 +31,10 @@ if [ "$(uname -s)" != "Darwin" ] && [ "$(uname -s)" != "Linux" ]; then
 fi
 
 # ── Detect install method ─────────────────────────────────────────────
+# Order of preference:
+#   1. Homebrew  — best UX on macOS, formula handles service & PATH
+#   2. pipx      — isolated venv, symlinks vg into a PATH dir, any OS
+#   3. pip --user — last resort, requires PATH fixup
 if command -v brew >/dev/null 2>&1; then
   INSTALL_METHOD="homebrew"
 elif command -v pipx >/dev/null 2>&1; then
@@ -39,7 +43,8 @@ elif command -v pip3 >/dev/null 2>&1; then
   INSTALL_METHOD="pip"
 else
   warn "Error: Neither Homebrew, pipx, nor pip3 found."
-  warn "Install Python 3.${MINIMUM_PYTHON_MINOR}+ from https://python.org first."
+  warn "Install Python 3.${MINIMUM_PYTHON_MINOR}+ from https://python.org first,"
+  warn "then run:  pip3 install --user pipx && pipx install vimgym"
   exit 1
 fi
 
@@ -67,35 +72,46 @@ case "$INSTALL_METHOD" in
     ;;
   pipx)
     pipx install vimgym
+    pipx ensurepath >/dev/null 2>&1 || true
     ;;
   pip)
-    pip3 install --user vimgym
+    pip3 install --user --upgrade vimgym
     USER_BIN="$(python3 -m site --user-base)/bin"
     case ":${PATH}:" in
-      *":${USER_BIN}:"*) ;;
+      *":${USER_BIN}:"*)
+        : # already in PATH
+        ;;
       *)
         printf '\n'
-        printf '%bAdd this to your shell config (~/.zshrc or ~/.bashrc):%b\n' "${C_PINK}" "${C_RESET}"
-        printf '  export PATH="%s:$PATH"\n' "${USER_BIN}"
+        warn "⚠  ${USER_BIN} is not in your PATH."
+        warn "   vg will not be available until you add it. Add this line"
+        warn "   to ~/.zshrc (or ~/.bashrc) and reload your shell:"
+        printf '\n'
+        printf '       export PATH="%s:$PATH"\n' "${USER_BIN}"
+        printf '\n'
+        warn "   We deliberately do NOT edit your shell config automatically."
+        warn "   For a hands-off install, use Homebrew or pipx instead."
         printf '\n'
         ;;
     esac
     ;;
 esac
 
-# ── Initialize vault ──────────────────────────────────────────────────
+# ── Initialize vault & smoke test ─────────────────────────────────────
 if command -v vg >/dev/null 2>&1; then
-  vg init || true
+  vg init >/dev/null 2>&1 || true
   printf '\n'
   say "✓ vimgym installed"
   printf '\n'
   printf 'Quick start:\n'
+  printf '%b  vg doctor%b         # verify install is healthy\n'  "${C_DIM}" "${C_RESET}"
   printf '%b  vg start%b          # start daemon + open browser\n' "${C_DIM}" "${C_RESET}"
   printf '%b  vg search "auth"%b  # search your sessions\n'        "${C_DIM}" "${C_RESET}"
   printf '%b  vg status%b         # check daemon status\n'         "${C_DIM}" "${C_RESET}"
   printf '\n'
   printf 'Docs: https://vimgym.xyz\n'
 else
-  warn "vg command not found in PATH after install. Add the user bin dir above and retry."
+  warn "vg command not found in PATH after install."
+  warn "Add the user bin directory printed above to your PATH and retry."
   exit 1
 fi

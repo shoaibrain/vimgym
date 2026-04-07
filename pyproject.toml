@@ -1,14 +1,32 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "vimgym"
-version = "0.1.0"
-description = "AI session memory for developers"
+version = "0.1.1"
+description = "AI session memory for developers — local, fast, no cloud"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
+authors = [{name = "Shoaib Rain"}]
+keywords = ["claude", "claude-code", "ai", "session", "memory", "search", "developer-tools", "local-first"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -29,6 +47,12 @@ dev = [
     "twine",
 ]
 
+[project.urls]
+Homepage = "https://vimgym.xyz"
+Repository = "https://github.com/shoaibrain/vimgym"
+Issues = "https://github.com/shoaibrain/vimgym/issues"
+Changelog = "https://github.com/shoaibrain/vimgym/blob/main/CHANGELOG.md"
+
 [project.scripts]
 vg = "vimgym.cli:main"
 
@@ -44,7 +68,8 @@ vimgym = [
     "ui/style.css",
     "ui/app.js",
     "ui/vendor/highlight.min.js",
-    "migrations/*.py",
+    "defaults/redaction-rules.json",
+    "defaults/config.json",
 ]
 
 [tool.ruff]

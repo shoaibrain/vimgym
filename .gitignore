@@ -1,25 +1,44 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
 
-# testing
-/coverage
+# Virtualenvs
+.venv/
+venv/
+ENV/
 
-# production
-/build
+# Build / dist
+/build/
+/dist/
 
-/data
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# misc
+# Local data fixtures (large, gitignored)
+/data/
+
+# The Homebrew tap is a separate git repo, cloned alongside but not part
+# of this repo. See RELEASE.md.
+/homebrew-vimgym/
+
+# Editor/OS junk
 .DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.idea/
+.vscode/
+*.swp
+*~
 
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Local env overrides (NEVER commit secrets)
+.env
+.env.local
+.envrc.local

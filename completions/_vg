@@ -1,0 +1,57 @@
+#compdef vg
+# zsh completion for vimgym
+
+_vg() {
+  local -a commands
+  commands=(
+    'init:Initialize vault and detect AI tool sources'
+    'start:Start daemon (watcher + web server)'
+    'stop:Stop daemon'
+    'status:Show daemon status and vault stats'
+    'open:Open browser UI'
+    'doctor:Run system diagnostics'
+    'search:Search sessions'
+    'config:View or modify configuration'
+  )
+
+  _arguments -C \
+    '--version[Show version and exit]' \
+    '--verbose[Verbose output]' \
+    '--help[Show help]' \
+    '1: :->command' \
+    '*::arg:->args'
+
+  case $state in
+    command)
+      _describe -t commands 'vg command' commands
+      ;;
+    args)
+      case $words[1] in
+        start)
+          _arguments \
+            '--no-browser[Do not open the browser on start]' \
+            '--help[Show help]'
+          ;;
+        search)
+          _arguments \
+            '--project[Filter by project name]:project' \
+            '--branch[Filter by git branch]:branch' \
+            '--since[Filter by date (ISO or Nd: 7d, 30d)]:since' \
+            '--limit[Maximum results]:limit' \
+            '--json[Output as JSON]' \
+            '--help[Show help]' \
+            '*:query'
+          ;;
+        config)
+          local -a config_subs
+          config_subs=(
+            'sources:List or toggle configured sources'
+          )
+          _describe -t commands 'config subcommand' config_subs
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_vg "$@"

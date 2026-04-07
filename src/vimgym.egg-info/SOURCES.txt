@@ -1,7 +1,9 @@
+CHANGELOG.md
 LICENSE
 MANIFEST.in
 README.md
 pyproject.toml
+completions/_vg
 defaults/config.json
 defaults/redaction-rules.json
 src/vimgym/__init__.py
@@ -18,8 +20,9 @@ src/vimgym.egg-info/dependency_links.txt
 src/vimgym.egg-info/entry_points.txt
 src/vimgym.egg-info/requires.txt
 src/vimgym.egg-info/top_level.txt
-src/vimgym/migrations/__init__.py
-src/vimgym/migrations/v1_to_v2.py
+src/vimgym/defaults/__init__.py
+src/vimgym/defaults/config.json
+src/vimgym/defaults/redaction-rules.json
 src/vimgym/pipeline/__init__.py
 src/vimgym/pipeline/metadata.py
 src/vimgym/pipeline/orchestrator.py
@@ -35,12 +38,13 @@ src/vimgym/ui/index.html
 src/vimgym/ui/style.css
 src/vimgym/ui/vendor/highlight.min.js
 tests/test_cli.py
+tests/test_cli_start_flags.py
 tests/test_config.py
 tests/test_config_v2.py
 tests/test_daemon.py
 tests/test_db.py
+tests/test_doctor.py
 tests/test_metadata.py
-tests/test_migration.py
 tests/test_orchestrator.py
 tests/test_parser.py
 tests/test_queries.py

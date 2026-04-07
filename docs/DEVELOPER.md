@@ -97,20 +97,30 @@ vimgym/
 │
 ├── tests/                      # 117 tests, see "Testing Guide" below
 ├── data/-Users-shoaibrain-edforge/   # 6 real Claude Code sessions used as fixtures
+├── completions/
+│   └── _vg                     # zsh completion script (installed by Homebrew)
 ├── defaults/
-│   ├── config.json             # default AppConfig values
-│   └── redaction-rules.json    # 18 redaction patterns
+│   ├── config.json             # default AppConfig values (also bundled in package)
+│   └── redaction-rules.json    # 18 redaction patterns (also bundled in package)
 ├── docs/
 │   ├── DEVELOPER.md            # this file
 │   ├── GUIDE.md                # user guide
 │   └── index.html              # vimgym.xyz landing page
-├── Formula/vimgym.rb           # Homebrew formula (with brew services block)
 ├── install.sh                  # curl | sh installer (Homebrew/pipx/pip)
-├── .github/workflows/test.yml  # CI: ruff + mypy + pytest + build + shellcheck
+├── Makefile                    # make install / test / lint / build / release-check
+├── .envrc                      # direnv: auto-activate .venv
+├── .github/workflows/
+│   ├── ci.yml                  # lint + tests on every PR (3.11/3.12/3.13 × Linux/macOS)
+│   └── release.yml             # publish to PyPI + bump Homebrew tap on GitHub Release
+├── CHANGELOG.md
+├── RELEASE.md                  # release runbook (one-time setup + release commands)
 ├── MANIFEST.in
 ├── pyproject.toml
 ├── LICENSE                     # MIT
 └── README.md
+
+# The Homebrew formula lives in a separate tap repo:
+#   https://github.com/shoaibrain/homebrew-vimgym
 ```
 
 ---
@@ -1230,15 +1240,38 @@ gets indexed by vimgym itself.
 
 ### CI
 
-`.github/workflows/test.yml` runs on `macos-14` against Python 3.11 and 3.12:
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push
+and PR against `main`:
 
-1. `ruff check src/ tests/`
-2. `mypy src/vimgym/ --ignore-missing-imports` (strict — no `|| true`)
-3. `pytest tests/ -v --tb=short --timeout=60`
-4. `python -m build`
-5. `twine check dist/*`
+- **Matrix:** Python 3.11 / 3.12 / 3.13 × Ubuntu + macOS (6 jobs)
+- **Lint:** `ruff check src/ tests/`
+- **Tests:** `pytest -v --tb=short`
+- **Build job** (after tests pass): `python -m build`, `twine check dist/*`,
+  and a verification step that asserts the wheel contains
+  `vimgym/defaults/redaction-rules.json` (regression for the wheel-missing-
+  defaults bug fixed in 0.1.1).
 
-A separate `shellcheck` job runs on `ubuntu-latest` over `install.sh`.
+The build artifacts are uploaded for 7 days and can be downloaded from the
+GitHub Actions run for manual validation.
+
+### Release pipeline
+
+[`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when
+a GitHub Release is published. It is fully automated end-to-end:
+
+1. **Verify version sync** — refuses to publish if `pyproject.toml`,
+   `src/vimgym/__init__.py`, and the git tag disagree.
+2. **Build** sdist + wheel and run `twine check`.
+3. **Publish to PyPI** via Trusted Publishing (OIDC). No long-lived API
+   tokens are stored in CI secrets.
+4. **Upload** the artifacts to the GitHub Release.
+5. **Wait** for PyPI to actually serve the new version (up to 5 minutes).
+6. **Open a PR** against [`shoaibrain/homebrew-vimgym`](https://github.com/shoaibrain/homebrew-vimgym)
+   that bumps the formula's `url` and `sha256`. The PR is reviewable —
+   merging it makes the new version available via `brew upgrade vimgym`.
+
+Cutting a new release is a single commit + tag + GitHub Release. See
+[RELEASE.md](../RELEASE.md) at the repo root for the exact runbook.
 
 ---
 

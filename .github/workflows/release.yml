@@ -1,0 +1,98 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+# We never want two releases racing.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # ───────────────────────── 1. Build & publish to PyPI ─────────────────────────
+  pypi:
+    name: build & publish to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vimgym
+    permissions:
+      id-token: write   # required for PyPI Trusted Publishing (OIDC)
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Verify version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PYPROJECT_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "([^"]+)"/\1/')
+          INIT_VERSION=$(grep -m1 '__version__' src/vimgym/__init__.py | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$TAG  pyproject=$PYPROJECT_VERSION  __init__=$INIT_VERSION"
+          if [ "$TAG" != "$PYPROJECT_VERSION" ] || [ "$TAG" != "$INIT_VERSION" ]; then
+            echo "::error::version mismatch — refuse to publish"
+            exit 1
+          fi
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Validate artifacts
+        run: |
+          twine check dist/*
+          # Belt-and-braces: confirm bundled defaults are inside the wheel.
+          unzip -l dist/vimgym-*.whl | grep -F "vimgym/defaults/redaction-rules.json"
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true
+
+      - name: Upload artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+
+  # ───────────────────────── 2. Bump the Homebrew tap ─────────────────────────
+  bump-homebrew:
+    name: bump homebrew tap
+    needs: pypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for PyPI to serve the new version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            if curl -fsS "https://pypi.org/pypi/vimgym/${VERSION}/json" >/dev/null; then
+              echo "✓ vimgym ${VERSION} is live on PyPI"
+              exit 0
+            fi
+            echo "[$i/30] waiting for PyPI..."
+            sleep 10
+          done
+          echo "::error::Timed out waiting for PyPI to publish ${VERSION}"
+          exit 1
+
+      - name: Bump tap formula
+        uses: dawidd6/action-homebrew-bump-formula@v4
+        with:
+          # Fine-grained PAT scoped to shoaibrain/homebrew-vimgym only:
+          #   Contents: read/write, Pull requests: read/write
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tap: shoaibrain/homebrew-vimgym
+          formula: vimgym
+          tag: ${{ github.event.release.tag_name }}
+          revision: ${{ github.event.release.target_commitish }}
+          force: false

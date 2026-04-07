@@ -10,9 +10,10 @@ def run(args):
 
 
 def test_version():
+    from vimgym import __version__
     r = run(["--version"])
     assert r.returncode == 0
-    assert "0.1.0" in r.stdout
+    assert __version__ in r.stdout
 
 
 def test_help():

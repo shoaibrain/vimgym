@@ -107,3 +107,39 @@ def test_stale_pid_cleared(daemon_cfg):
     cfg.pid_path.write_text("999999")  # very unlikely to exist
     assert is_running(cfg) is False
     assert not cfg.pid_path.exists()
+
+
+def test_no_duplicate_log_lines(daemon_cfg):
+    """Regression test for the daemon double-write logging bug.
+
+    The parent's start_daemon() spawns the child with stdout/stderr redirected
+    to the log file. The child's logger must therefore use ONLY a FileHandler;
+    a StreamHandler(sys.stderr) would cause every record to appear twice.
+    """
+    cfg = daemon_cfg
+    start_daemon(cfg)
+    try:
+        # Wait for the server to come up and the backfill log line to appear.
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            try:
+                r = httpx.get(f"http://127.0.0.1:{cfg.server_port}/health", timeout=0.5)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.1)
+        # Give the logger a moment to flush.
+        time.sleep(0.5)
+
+        assert cfg.log_path.exists(), "log file was not created"
+        content = cfg.log_path.read_text(encoding="utf-8", errors="replace")
+        backfill_lines = [
+            ln for ln in content.splitlines() if "backfill processed" in ln
+        ]
+        assert len(backfill_lines) == 1, (
+            f"Expected exactly 1 'backfill processed' line, got "
+            f"{len(backfill_lines)}:\n{backfill_lines}"
+        )
+    finally:
+        stop_daemon(cfg)

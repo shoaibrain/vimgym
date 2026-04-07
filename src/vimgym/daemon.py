@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 import signal
 import subprocess
@@ -19,6 +20,59 @@ from vimgym.server import create_app
 from vimgym.watcher import backfill, start_watching
 
 logger = logging.getLogger(__name__)
+
+
+# Log rotation: cap each file at 5 MB, keep 5 backups (~25 MB total).
+_LOG_MAX_BYTES = 5 * 1024 * 1024
+_LOG_BACKUP_COUNT = 5
+
+
+def _configure_logging(config: AppConfig) -> None:
+    """Configure root logger exactly once for the daemon foreground process.
+
+    Attaches only a RotatingFileHandler. We deliberately do NOT attach a
+    StreamHandler(sys.stderr): the parent's start_daemon() spawns this process
+    with stdout/stderr redirected to the same log file, so a StreamHandler
+    would write every record twice. Anything that escapes Python logging
+    (uncaught tracebacks, third-party prints) still lands in the log via
+    that fd redirect.
+    """
+    root = logging.getLogger()
+    if getattr(root, "_vimgym_configured", False):
+        return
+
+    config.log_path.parent.mkdir(parents=True, exist_ok=True)
+    level = getattr(logging, config.log_level.upper(), logging.INFO)
+    root.setLevel(level)
+
+    # Drop any handlers a third party (or a re-import) may have attached
+    # before we got here, so we own logging end-to-end.
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+    handler = logging.handlers.RotatingFileHandler(
+        config.log_path,
+        maxBytes=_LOG_MAX_BYTES,
+        backupCount=_LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    root.addHandler(handler)
+
+    # Quiet uvicorn's own loggers and force them to propagate to our root
+    # handler. Without this, uvicorn installs its own StreamHandler on
+    # uvicorn.error / uvicorn.access at startup, which would re-introduce
+    # the double-write via the inherited stderr fd.
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        lg = logging.getLogger(name)
+        for h in list(lg.handlers):
+            lg.removeHandler(h)
+        lg.propagate = True
+        lg.setLevel(level)
+
+    root._vimgym_configured = True  # type: ignore[attr-defined]
 
 
 # ───────────────────────── PID file ─────────────────────────
@@ -68,17 +122,9 @@ def run_foreground(config: AppConfig) -> int:
     """Run watcher + uvicorn in this process. Blocks until SIGTERM/SIGINT."""
     config.vault_dir.mkdir(parents=True, exist_ok=True)
     config.log_path.parent.mkdir(parents=True, exist_ok=True)
+    _configure_logging(config)
     init_db(config.db_path)
     save_config(config)
-
-    logging.basicConfig(
-        level=getattr(logging, config.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[
-            logging.FileHandler(config.log_path),
-            logging.StreamHandler(sys.stderr),
-        ],
-    )
 
     # Backfill before starting the watcher so we don't double-process.
     n = backfill(config)
@@ -94,6 +140,7 @@ def run_foreground(config: AppConfig) -> int:
             port=config.server_port,
             log_level=config.log_level.lower(),
             access_log=False,
+            log_config=None,  # we own logging; don't let uvicorn re-attach handlers
         )
     )
 
