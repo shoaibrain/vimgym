@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "rules": [
+    {"name": "anthropic_key",     "pattern": "sk-ant-[a-zA-Z0-9_\\-]{60,}",                                "replacement": "[REDACTED_ANTHROPIC_KEY]"},
+    {"name": "openai_key",        "pattern": "sk-[a-zA-Z0-9_\\-]{40,}",                                    "replacement": "[REDACTED_OPENAI_KEY]"},
+    {"name": "aws_access",        "pattern": "AKIA[0-9A-Z]{16}",                                           "replacement": "[REDACTED_AWS_KEY]"},
+    {"name": "aws_secret",        "pattern": "(?i)aws.secret.{0,20}[=:]\\s*[a-zA-Z0-9/+]{40}",            "replacement": "[REDACTED_AWS_SECRET]"},
+    {"name": "aws_session_token", "pattern": "AQoXb[a-zA-Z0-9+/]{100,}",                                   "replacement": "[REDACTED_AWS_SESSION]"},
+    {"name": "arn",               "pattern": "arn:aws:[a-z0-9\\-]+:[a-z0-9\\-]*:\\d{12}:[^\\s\"']+",     "replacement": "arn:aws:[REDACTED]"},
+    {"name": "bearer_token",      "pattern": "Bearer\\s+[a-zA-Z0-9._\\-]{20,}",                            "replacement": "Bearer [REDACTED]"},
+    {"name": "github_token",      "pattern": "ghp_[a-zA-Z0-9_]{36,}",                                      "replacement": "[REDACTED_GITHUB_TOKEN]"},
+    {"name": "jwt",               "pattern": "eyJ[a-zA-Z0-9_\\-]+\\.[a-zA-Z0-9_\\-]+\\.[a-zA-Z0-9_\\-]+",  "replacement": "[REDACTED_JWT]"},
+    {"name": "kubeconfig_cert",   "pattern": "certificate-authority-data:\\s*[A-Za-z0-9+/=]{50,}",         "replacement": "certificate-authority-data: [REDACTED]"},
+    {"name": "k8s_token",         "pattern": "(?i)token:\\s*[a-zA-Z0-9._\\-]{40,}",                        "replacement": "token: [REDACTED]"},
+    {"name": "private_key_inline","pattern": "-----BEGIN (EC|RSA|OPENSSH|DSA) PRIVATE KEY-----[\\s\\S]+?-----END \\1 PRIVATE KEY-----", "replacement": "[REDACTED_PRIVATE_KEY]"},
+    {"name": "pem_block",         "pattern": "-----BEGIN [A-Z ]+-----[\\s\\S]+?-----END [A-Z ]+-----",     "replacement": "[REDACTED_PEM_BLOCK]"},
+    {"name": "docker_auth",       "pattern": "\"auth\":\\s*\"[A-Za-z0-9+/=]{20,}\"",                        "replacement": "\"auth\": \"[REDACTED]\""},
+    {"name": "postgres_password", "pattern": "postgresql://[^:/\\s]+:[^@/\\s]+@",                           "replacement": "postgresql://[user]:[REDACTED]@"},
+    {"name": "database_url",      "pattern": "(mongodb|postgres|mysql|redis)://[^\\s]{8,}",                "replacement": "[REDACTED_DB_URL]"},
+    {"name": "npm_token",         "pattern": "//registry\\.npmjs\\.org/:_authToken=[^\\s]+",                "replacement": "//registry.npmjs.org/:_authToken=[REDACTED]"},
+    {"name": "env_secret",        "pattern": "(?i)(password|secret|api_key|private_key)\\s*=\\s*\\S{8,}",   "replacement": "\\1=[REDACTED]"}
+  ]
+}

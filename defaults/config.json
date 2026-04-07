@@ -1,0 +1,11 @@
+{
+  "vault_dir": "~/.vimgym",
+  "watch_path": "~/.claude/projects",
+  "server_host": "127.0.0.1",
+  "server_port": 7337,
+  "debounce_secs": 5.0,
+  "stability_polls": 2,
+  "stability_poll_interval": 1.0,
+  "auto_open_browser": true,
+  "log_level": "INFO"
+}

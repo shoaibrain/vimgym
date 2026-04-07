@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vimgym — terminal interface</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void:    #09090B;
+  --panel:   #0F0F14;
+  --surface: #16161E;
+  --border:  #2A2A38;
+  --matrix:  #00FF41;
+  --matrix2: #00CC33;
+  --mlo:     #003D10;
+  --pink:    #FF078E;
+  --pink2:   #CC0671;
+  --cyan:    #0DF1ED;
+  --cyan2:   #0ABFBB;
+  --amber:   #FFB800;
+  --purple:  #BD93F9;
+  --red:     #FF5555;
+  --hi:      #F8F8F2;
+  --mid:     #8888A0;
+  --lo:      #44445A;
+  --mono:    'JetBrains Mono', monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #060608;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--hi);
+  min-height: 100vh;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+h2 {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--lo);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+
+/* Terminal window chrome */
+.terminal {
+  background: var(--void);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+}
+
+.term-titlebar {
+  background: var(--panel);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.term-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.term-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+}
+
+.td-close  { background: #FF5F57; }
+.td-min    { background: #FFBD2E; }
+.td-max    { background: #28C840; }
+
+.term-title {
+  font-size: 11px;
+  color: var(--mid);
+  margin: 0 auto;
+}
+
+.term-body {
+  padding: 16px;
+  line-height: 1.7;
+  min-height: 200px;
+}
+
+/* Shell prompt */
+.prompt {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.p-user  { color: var(--matrix); }
+.p-at    { color: var(--mid); }
+.p-host  { color: var(--cyan); }
+.p-sep   { color: var(--mid); }
+.p-path  { color: var(--purple); }
+.p-branch { color: var(--amber); font-size: 11px; }
+.p-sym   { color: var(--pink); font-weight: 700; }
+.p-cmd   { color: var(--hi); }
+
+/* Output styles */
+.out { padding-left: 0; margin: 4px 0 12px; }
+
+/* Box drawing */
+.box {
+  border: none;
+  margin: 4px 0;
+}
+
+.box-line { white-space: pre; font-size: 13px; line-height: 1.6; }
+.bk-matrix  { color: var(--matrix); }
+.bk-cyan    { color: var(--cyan); }
+.bk-pink    { color: var(--pink); }
+.bk-amber   { color: var(--amber); }
+.bk-mid     { color: var(--mid); }
+.bk-lo      { color: var(--lo); }
+.bk-hi      { color: var(--hi); }
+
+/* search results table */
+.result-table { margin: 4px 0; }
+.rt-header { white-space: pre; color: var(--lo); font-size: 12px; }
+.rt-row { white-space: pre; font-size: 12px; cursor: default; transition: background 0.1s; }
+.rt-row:hover { background: var(--surface); }
+.rt-row.selected { background: var(--pink2); color: var(--void); }
+
+.hl { background: rgba(255,7,142,0.25); color: var(--pink); border-radius: 1px; }
+.hl-g { background: rgba(0,255,65,0.15); color: var(--matrix); border-radius: 1px; }
+
+/* Status bar */
+.statusbar {
+  display: flex;
+  align-items: stretch;
+  font-size: 11px;
+  height: 22px;
+  background: var(--pink2);
+  color: var(--void);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.sb { padding: 0 10px; display: flex; align-items: center; white-space: nowrap; }
+.sb-mode { background: var(--void); color: var(--pink); letter-spacing: 1px; }
+.sb-arrow-r { width:0;height:0;border-top:11px solid transparent;border-bottom:11px solid transparent;border-left:7px solid var(--void); }
+.sb-arrow-l { width:0;height:0;border-top:11px solid transparent;border-bottom:11px solid transparent;border-right:7px solid rgba(0,0,0,0.2); }
+.sb-mid { background: rgba(0,0,0,0.15); }
+.sb-right { margin-left: auto; display: flex; }
+.sb-info { background: rgba(0,0,0,0.2); }
+
+/* status output */
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 32px;
+  margin: 4px 0;
+}
+
+.sg-row { white-space: pre; font-size: 12px; line-height: 1.8; }
+.sg-key { color: var(--mid); }
+.sg-val-green  { color: var(--matrix); font-weight: 700; }
+.sg-val-cyan   { color: var(--cyan); font-weight: 700; }
+.sg-val-pink   { color: var(--pink); font-weight: 700; }
+.sg-val-amber  { color: var(--amber); font-weight: 700; }
+.sg-val-hi     { color: var(--hi); }
+
+/* vg start output */
+.boot-line { white-space: pre; font-size: 12px; line-height: 1.8; }
+.boot-ok   { color: var(--matrix); }
+.boot-info { color: var(--cyan); }
+.boot-warn { color: var(--amber); }
+.boot-dim  { color: var(--lo); }
+
+/* cursor blink */
+.cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: var(--matrix);
+  vertical-align: text-bottom;
+  animation: blink 1.1s step-end infinite;
+  box-shadow: 0 0 6px var(--matrix);
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.glow-matrix { text-shadow: 0 0 8px var(--matrix); }
+.glow-pink   { text-shadow: 0 0 8px var(--pink); }
+.glow-cyan   { text-shadow: 0 0 8px var(--cyan); }
+
+/* section labels */
+.section-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--lo);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.section-label::before, .section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+}
+
+.section-label::before { background: linear-gradient(90deg, transparent, var(--lo)); }
+.section-label::after  { background: linear-gradient(90deg, var(--lo), transparent); }
+
+.col-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.col-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- SECTION 1: vg start                                    -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div>
+<div class="section-label">vg start — daemon boot sequence</div>
+<div class="terminal">
+  <div class="term-titlebar">
+    <div class="term-dots">
+      <div class="term-dot td-close"></div>
+      <div class="term-dot td-min"></div>
+      <div class="term-dot td-max"></div>
+    </div>
+    <div class="term-title">bash — 120×40</div>
+  </div>
+  <div class="term-body">
+
+    <div class="prompt">
+      <span class="p-user">shoaibrain</span><span class="p-at">@</span><span class="p-host">mbp</span>
+      <span class="p-sep">:</span><span class="p-path">~/vimgym</span>
+      <span class="p-branch">(main)</span>
+      <span class="p-sym">❯</span>
+      <span class="p-cmd">vg start</span>
+    </div>
+
+    <div class="out">
+<div class="boot-line bk-matrix" style="font-size:14px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px">
+<span class="glow-matrix">vim</span><span class="glow-pink" style="color:var(--pink)">gym</span> <span style="color:var(--lo);font-size:11px;font-weight:400">v0.1.0  — ai session memory for developers</span></div>
+<div class="boot-line bk-lo">─────────────────────────────────────────────────</div>
+<div class="boot-line boot-ok">  ✓  vault initialized       ~/.vimgym/vault.db</div>
+<div class="boot-line boot-ok">  ✓  FTS5 available           SQLite 3.43.2</div>
+<div class="boot-line boot-ok">  ✓  redaction engine loaded  10 patterns compiled</div>
+<div class="boot-line boot-ok">  ✓  watcher started          ~/.claude/projects/</div>
+<div class="boot-line boot-info">  →  backfill scan            6 sessions found, 0 new</div>
+<div class="boot-line boot-ok">  ✓  HTTP server listening     http://127.0.0.1:7337</div>
+<div class="boot-line boot-ok">  ✓  WebSocket ready           ws://127.0.0.1:7337/ws</div>
+<div class="boot-line bk-lo">─────────────────────────────────────────────────</div>
+<div class="boot-line" style="color:var(--cyan);margin-top:4px">  ⬡  opening browser → http://127.0.0.1:7337</div>
+<div class="boot-line boot-dim">  pid written → ~/.vimgym/vimgym.pid (23847)</div>
+<div class="boot-line boot-dim" style="margin-top:8px">  press ctrl+c to stop  ·  vg stop to graceful shutdown</div>
+    </div>
+
+    <div class="statusbar">
+      <div class="sb sb-mode">RUNNING</div>
+      <div class="sb-arrow-r"></div>
+      <div class="sb sb-mid">⬡ vimgym</div>
+      <div class="sb sb-mid">127.0.0.1:7337</div>
+      <div class="sb sb-mid">6 sessions</div>
+      <div class="sb-right">
+        <div class="sb-arrow-l"></div>
+        <div class="sb sb-info">watching ~/.claude/projects</div>
+        <div class="sb sb-info">FTS5 ✓</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- SECTION 2: vg status  +  vg search                    -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="col-2">
+
+<!-- vg status -->
+<div>
+<div class="section-label">vg status</div>
+<div class="terminal">
+  <div class="term-titlebar">
+    <div class="term-dots">
+      <div class="term-dot td-close"></div>
+      <div class="term-dot td-min"></div>
+      <div class="term-dot td-max"></div>
+    </div>
+    <div class="term-title">vg status</div>
+  </div>
+  <div class="term-body">
+    <div class="prompt">
+      <span class="p-user">shoaibrain</span><span class="p-at">@</span><span class="p-host">mbp</span>
+      <span class="p-sep">:</span><span class="p-path">~</span>
+      <span class="p-sym">❯</span>
+      <span class="p-cmd">vg status</span>
+    </div>
+    <div class="out">
+<div class="box-line bk-matrix">┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓</div>
+<div class="box-line bk-matrix">┃  <span class="glow-matrix" style="font-weight:800">vim</span><span class="glow-pink" style="color:var(--pink);font-weight:800">gym</span> <span class="bk-mid">daemon status</span>             ┃</div>
+<div class="box-line bk-matrix">┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫</div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">daemon   </span>  <span class="sg-val-green glow-matrix">● running</span>  <span class="bk-lo">pid 23847</span>   <span class="bk-matrix">┃</span></div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">uptime   </span>  <span class="sg-val-cyan">2h 14m 33s</span>              <span class="bk-matrix">┃</span></div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">server   </span>  <span class="sg-val-cyan">127.0.0.1:7337</span>          <span class="bk-matrix">┃</span></div>
+<div class="box-line bk-matrix">┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫</div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">sessions </span>  <span class="sg-val-green glow-matrix" style="font-size:14px;font-weight:800">6</span>                        <span class="bk-matrix">┃</span></div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">projects </span>  edforge, vimgym          <span class="bk-matrix">┃</span></div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">ai time  </span>  <span class="sg-val-pink glow-pink">32h 34m</span>                  <span class="bk-matrix">┃</span></div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">db size  </span>  <span class="sg-val-amber">48.2 MB</span>                  <span class="bk-matrix">┃</span></div>
+<div class="box-line bk-matrix">┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫</div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">watching </span>  ~/.claude/projects/       <span class="bk-matrix">┃</span></div>
+<div class="box-line"><span class="bk-matrix">┃</span>  <span class="bk-mid">last bkup</span>  <span class="sg-val-green">14 seconds ago</span>           <span class="bk-matrix">┃</span></div>
+<div class="box-line bk-matrix">┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛</div>
+    </div>
+
+    <div class="statusbar">
+      <div class="sb sb-mode">NORMAL</div>
+      <div class="sb-arrow-r"></div>
+      <div class="sb sb-mid">⬡ vimgym</div>
+      <div class="sb-right">
+        <div class="sb-arrow-l"></div>
+        <div class="sb sb-info">6 sessions · 48.2MB</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- vg search -->
+<div>
+<div class="section-label">vg search "CORS" — interactive results</div>
+<div class="terminal">
+  <div class="term-titlebar">
+    <div class="term-dots">
+      <div class="term-dot td-close"></div>
+      <div class="term-dot td-min"></div>
+      <div class="term-dot td-max"></div>
+    </div>
+    <div class="term-title">vg search</div>
+  </div>
+  <div class="term-body">
+    <div class="prompt">
+      <span class="p-user">shoaibrain</span><span class="p-at">@</span><span class="p-host">mbp</span>
+      <span class="p-sep">:</span><span class="p-path">~</span>
+      <span class="p-sym">❯</span>
+      <span class="p-cmd">vg search "CORS" --project edforge</span>
+    </div>
+    <div class="out">
+<div class="box-line bk-cyan">┌──────────────────────────────────────────────────────────────────┐</div>
+<div class="box-line bk-cyan">│  <span class="bk-hi">query</span>  <span class="glow-pink" style="color:var(--pink);font-weight:700">"CORS"</span>  <span class="bk-lo">·</span>  <span class="bk-mid">project:edforge</span>  <span class="bk-lo">·</span>  <span class="sg-val-cyan">2 results</span>          │</div>
+<div class="box-line bk-cyan">├────┬──────────────────────────────────────────────────┬──────────┤</div>
+<div class="box-line bk-lo">│ ## │ title                                            │ date     │</div>
+<div class="box-line bk-cyan">├────┼──────────────────────────────────────────────────┼──────────┤</div>
+<div class="rt-row selected">│ <span style="color:var(--void);font-weight:800"> 1</span> │ Implement env-driven <span style="background:rgba(0,0,0,0.3);font-weight:800">CORS</span> and domain config  │ Apr 5    │</div>
+<div class="rt-row">│  2 │ Ground-truth audit of EdForge and UAT env       │ Apr 4    │</div>
+<div class="box-line bk-cyan">└────┴──────────────────────────────────────────────────┴──────────┘</div>
+<div class="box-line" style="margin-top:6px;color:var(--cyan)">┌─ <span class="bk-hi">result 1</span>  <span class="bk-lo">3438c55b · dev · 5h20m · 470 msgs</span></div>
+<div class="box-line bk-lo">│  ...updated <span class="hl">CORS</span> origins to read from CDK_PARAM_CORS_ORIGIN</div>
+<div class="box-line bk-lo">│  env var, replacing hardcoded localhost:3000. All 47</div>
+<div class="box-line bk-lo">└  occurrences resolved across 12 files.</div>
+<div class="box-line bk-lo" style="margin-top:8px;font-size:11px"> ↵ open detail  ·  ↑↓ navigate  ·  e export  ·  q quit</div>
+    </div>
+
+    <div class="statusbar">
+      <div class="sb sb-mode">SEARCH</div>
+      <div class="sb-arrow-r"></div>
+      <div class="sb sb-mid">"CORS"</div>
+      <div class="sb sb-mid">edforge</div>
+      <div class="sb-right">
+        <div class="sb-arrow-l"></div>
+        <div class="sb sb-info">1/2</div>
+        <div class="sb sb-info">BM25 ✓</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+</div><!-- /col-2 -->
+
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- SECTION 3: three terminal commands side by side        -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div class="col-3">
+
+<!-- vg search with --since -->
+<div>
+<div class="section-label">vg search --since 7d</div>
+<div class="terminal">
+  <div class="term-titlebar">
+    <div class="term-dots">
+      <div class="term-dot td-close"></div>
+      <div class="term-dot td-min"></div>
+      <div class="term-dot td-max"></div>
+    </div>
+    <div class="term-title">filters</div>
+  </div>
+  <div class="term-body">
+    <div class="prompt">
+      <span class="p-sym">❯</span>
+      <span class="p-cmd">vg search "auth" --since 7d --branch dev</span>
+    </div>
+    <div class="out">
+<div class="box-line bk-cyan" style="font-size:12px">┌─ query: <span style="color:var(--pink);font-weight:700">"auth"</span>  since: <span style="color:var(--amber)">7d</span>  branch: <span style="color:var(--matrix)">dev</span></div>
+<div class="box-line bk-lo" style="font-size:12px">│  3 sessions matched</div>
+<div class="box-line bk-lo" style="height:4px"> </div>
+<div class="rt-row selected" style="font-size:11px;padding-left:2px">▶  Implement env-driven <span style="background:rgba(0,0,0,0.3);font-weight:800">CORS</span> · Apr 5</div>
+<div class="rt-row" style="font-size:11px;padding-left:2px">   Finance microservice audit · Apr 3</div>
+<div class="rt-row" style="font-size:11px;padding-left:2px">   Remove hardcoded backend cfg · Apr 5</div>
+<div class="box-line bk-lo" style="font-size:11px;margin-top:6px"> ↵ open  ↑↓ navigate  q quit</div>
+    </div>
+    <div class="statusbar">
+      <div class="sb sb-mode">SEARCH</div>
+      <div class="sb-arrow-r"></div>
+      <div class="sb sb-mid">auth · 7d · dev</div>
+      <div class="sb-right">
+        <div class="sb-arrow-l"></div>
+        <div class="sb sb-info">1/3</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- vg search --json -->
+<div>
+<div class="section-label">vg search --json (pipe-friendly)</div>
+<div class="terminal">
+  <div class="term-titlebar">
+    <div class="term-dots">
+      <div class="term-dot td-close"></div>
+      <div class="term-dot td-min"></div>
+      <div class="term-dot td-max"></div>
+    </div>
+    <div class="term-title">JSON output</div>
+  </div>
+  <div class="term-body">
+    <div class="prompt">
+      <span class="p-sym">❯</span>
+      <span class="p-cmd">vg search "CloudFormation" --json | jq '.[0]'</span>
+    </div>
+    <div class="out">
+<pre class="boot-line" style="font-size:11px;color:var(--hi);line-height:1.6">{
+  <span style="color:var(--cyan)">"session_uuid"</span>: <span style="color:var(--matrix)">"eaa3009a..."</span>,
+  <span style="color:var(--cyan)">"ai_title"</span>:     <span style="color:var(--matrix)">"Resolve circular Cloud-</span>
+<span style="color:var(--matrix)">                  Formation dependencies"</span>,
+  <span style="color:var(--cyan)">"project_name"</span>: <span style="color:var(--matrix)">"edforge"</span>,
+  <span style="color:var(--cyan)">"git_branch"</span>:   <span style="color:var(--matrix)">"fee-to-enrollment"</span>,
+  <span style="color:var(--cyan)">"duration_secs"</span>:<span style="color:var(--amber)"> 1527</span>,
+  <span style="color:var(--cyan)">"tools_used"</span>:   <span style="color:var(--hi)">[</span><span style="color:var(--matrix)">"Bash"</span>, <span style="color:var(--matrix)">"Read"</span><span style="color:var(--hi)">]</span>,
+  <span style="color:var(--cyan)">"score"</span>:        <span style="color:var(--amber)">-4.821</span>
+}</pre>
+    </div>
+    <div class="statusbar">
+      <div class="sb sb-mode">PIPE</div>
+      <div class="sb-arrow-r"></div>
+      <div class="sb sb-mid">JSON mode</div>
+      <div class="sb-right">
+        <div class="sb-arrow-l"></div>
+        <div class="sb sb-info">stdout</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- vg stop -->
+<div>
+<div class="section-label">vg stop — graceful shutdown</div>
+<div class="terminal">
+  <div class="term-titlebar">
+    <div class="term-dots">
+      <div class="term-dot td-close"></div>
+      <div class="term-dot td-min"></div>
+      <div class="term-dot td-max"></div>
+    </div>
+    <div class="term-title">vg stop</div>
+  </div>
+  <div class="term-body">
+    <div class="prompt">
+      <span class="p-sym">❯</span>
+      <span class="p-cmd">vg stop</span>
+    </div>
+    <div class="out">
+<div class="boot-line" style="color:var(--amber)">  ⊘  sending SIGTERM to pid 23847...</div>
+<div class="boot-line boot-ok">  ✓  watcher stopped</div>
+<div class="boot-line boot-ok">  ✓  DB connections closed</div>
+<div class="boot-line boot-ok">  ✓  HTTP server stopped</div>
+<div class="boot-line boot-ok">  ✓  PID file removed</div>
+<div class="boot-line bk-lo" style="margin-top:6px;font-size:11px">  vimgym daemon stopped. vault intact at ~/.vimgym/</div>
+    </div>
+    <div class="statusbar">
+      <div class="sb sb-mode" style="color:var(--amber);background:var(--void)">STOPPED</div>
+      <div class="sb-arrow-r" style="border-left-color:var(--void)"></div>
+      <div class="sb sb-mid">⬡ vimgym</div>
+      <div class="sb-right">
+        <div class="sb-arrow-l"></div>
+        <div class="sb sb-info">vault intact</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+</div><!-- /col-3 -->
+
+
+<!-- ══════════════════════════════════════════════════════ -->
+<!-- SECTION 4: LOGO + design system reference              -->
+<!-- ══════════════════════════════════════════════════════ -->
+<div>
+<div class="section-label">design system — neon void</div>
+<div class="terminal">
+  <div class="term-titlebar">
+    <div class="term-dots">
+      <div class="term-dot td-close"></div>
+      <div class="term-dot td-min"></div>
+      <div class="term-dot td-max"></div>
+    </div>
+    <div class="term-title">vimgym design system v0.1</div>
+  </div>
+  <div class="term-body" style="padding:24px 32px;display:grid;grid-template-columns:1fr 1fr;gap:32px;align-items:start">
+
+    <!-- Logo lockup -->
+    <div style="display:flex;flex-direction:column;gap:20px">
+      <div>
+        <div style="font-size:9px;letter-spacing:2px;color:var(--lo);margin-bottom:12px;text-transform:uppercase">Primary lockup</div>
+        <div style="font-size:56px;font-weight:900;letter-spacing:-2px;line-height:1">
+          <span style="color:var(--matrix);text-shadow:0 0 20px var(--matrix),0 0 40px rgba(0,255,65,0.4)">vim</span><span style="color:var(--pink);text-shadow:0 0 20px var(--pink),0 0 40px rgba(255,7,142,0.4)">gym</span>
+        </div>
+        <div style="font-size:10px;color:var(--lo);letter-spacing:3px;margin-top:4px;text-transform:uppercase">ai session memory</div>
+      </div>
+
+      <div>
+        <div style="font-size:9px;letter-spacing:2px;color:var(--lo);margin-bottom:8px;text-transform:uppercase">Compact lockup</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:22px;font-weight:900;color:var(--matrix);text-shadow:0 0 10px var(--matrix)">vim</span><span style="font-size:22px;font-weight:900;color:var(--pink);text-shadow:0 0 10px var(--pink)">gym</span>
+          <div style="width:1px;height:20px;background:var(--border)"></div>
+          <span style="font-size:10px;color:var(--mid);letter-spacing:1px">v0.1.0</span>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:9px;letter-spacing:2px;color:var(--lo);margin-bottom:8px;text-transform:uppercase">CLI badge</div>
+        <div style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid var(--matrix);border-radius:2px;background:rgba(0,255,65,0.05)">
+          <span style="color:var(--matrix);font-weight:700;font-size:12px">❯</span>
+          <span style="color:var(--hi);font-size:12px">vg</span>
+          <span style="color:var(--lo);font-size:12px">start</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Color palette -->
+    <div>
+      <div style="font-size:9px;letter-spacing:2px;color:var(--lo);margin-bottom:12px;text-transform:uppercase">Color palette — Neon Void</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:32px;border-radius:3px;background:#00FF41;box-shadow:0 0 10px rgba(0,255,65,0.6)"></div>
+          <div><div style="color:var(--matrix);font-size:12px;font-weight:700">#00FF41</div><div style="color:var(--lo);font-size:10px">Matrix Green — active, success, live</div></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:32px;border-radius:3px;background:#FF078E;box-shadow:0 0 10px rgba(255,7,142,0.6)"></div>
+          <div><div style="color:var(--pink);font-size:12px;font-weight:700">#FF078E</div><div style="color:var(--lo);font-size:10px">Vice Pink — selection, search marks, CTA</div></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:32px;border-radius:3px;background:#0DF1ED;box-shadow:0 0 10px rgba(13,241,237,0.6)"></div>
+          <div><div style="color:var(--cyan);font-size:12px;font-weight:700">#0DF1ED</div><div style="color:var(--lo);font-size:10px">Neon Cyan — borders, project names, info</div></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:32px;border-radius:3px;background:#FFB800;box-shadow:0 0 10px rgba(255,184,0,0.5)"></div>
+          <div><div style="color:var(--amber);font-size:12px;font-weight:700">#FFB800</div><div style="color:var(--lo);font-size:10px">Amber — warnings, durations, timestamps</div></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:32px;border-radius:3px;background:#BD93F9"></div>
+          <div><div style="color:var(--purple);font-size:12px;font-weight:700">#BD93F9</div><div style="color:var(--lo);font-size:10px">Dracula Purple — assistant messages, AI</div></div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:32px;height:32px;border-radius:3px;background:#09090B;border:1px solid var(--border)"></div>
+          <div><div style="color:var(--hi);font-size:12px;font-weight:700">#09090B</div><div style="color:var(--lo);font-size:10px">The Void — deepest background</div></div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+</body>
+</html>

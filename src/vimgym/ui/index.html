@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vimgym</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<canvas id="matrix-canvas"></canvas>
+
+<!-- COMMAND PALETTE -->
+<div class="cmd-overlay" id="cmdOverlay">
+  <div class="cmd-palette">
+    <div class="cmd-input-row">
+      <span class="cmd-prompt">/</span>
+      <input class="cmd-input" id="cmdInput" placeholder="search sessions..." autocomplete="off" />
+    </div>
+    <div class="cmd-results" id="cmdResults"></div>
+    <div class="cmd-footer">
+      <span><kbd>↵</kbd> open</span>
+      <span><kbd>↑↓</kbd> navigate</span>
+      <span><kbd>esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- APP -->
+<div class="app">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="logo">
+      <span class="logo-vim">vim</span><span class="logo-gym">gym</span>
+      <div class="logo-dot"></div>
+    </div>
+
+    <div class="topbar-search">
+      <span class="search-icon">⌕</span>
+      <input id="topSearch" placeholder="search sessions...  ⌘K" readonly />
+    </div>
+
+    <div class="topbar-actions">
+      <span class="live-dot" id="liveDot">watching</span>
+      <button class="topbar-btn" id="settingsBtn" title="settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Projects</div>
+      <div id="sidebarProjects"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Branches</div>
+      <div id="sidebarBranches"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Activity — 52 weeks</div>
+      <div class="heatmap">
+        <div class="heatmap-grid" id="heatmap"></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Vault Stats</div>
+      <div id="sidebarStats"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Tools Used</div>
+      <div class="tool-chip-list" id="sidebarTools"></div>
+    </div>
+  </aside>
+
+  <!-- INBOX -->
+  <main class="inbox">
+    <div class="inbox-header">
+      <span class="inbox-title">Sessions</span>
+      <span class="inbox-count" id="inboxCount">—</span>
+    </div>
+    <div class="inbox-list" id="inboxList"></div>
+  </main>
+
+  <!-- DETAIL -->
+  <section class="detail" id="detail">
+    <div class="welcome" id="welcome">
+      <div class="welcome-logo">
+        <span class="welcome-vim">vim</span><span class="welcome-gym">gym</span>
+      </div>
+      <div class="glow-line"></div>
+      <div class="welcome-tagline">ai session memory</div>
+      <div class="welcome-hint">
+        Press <kbd>⌘K</kbd> to search · Click a session to read
+      </div>
+    </div>
+  </section>
+
+  <!-- STATUS BAR -->
+  <footer class="statusbar">
+    <span class="sb-mode" id="sbMode">NORMAL</span>
+    <span class="sb-arrow"></span>
+    <span class="sb-segment">⬡ vimgym</span>
+    <span class="sb-segment" id="sbContext">—</span>
+    <span class="sb-segment" id="sbSession"></span>
+    <div class="sb-right">
+      <span class="sb-segment" id="sbCount">0 sessions</span>
+      <span class="sb-segment" id="sbWatch">watching —</span>
+      <span class="sb-segment">FTS5 ✓</span>
+    </div>
+  </footer>
+
+</div>
+
+<script src="/vendor/highlight.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

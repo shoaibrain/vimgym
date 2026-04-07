@@ -1,0 +1,8 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include defaults/config.json
+include defaults/redaction-rules.json
+recursive-include src/vimgym/ui *.html *.css *.js
+recursive-include src/vimgym/ui/vendor *.js
+recursive-include src/vimgym/migrations *.py

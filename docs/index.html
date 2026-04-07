@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vimgym — AI session memory for developers</title>
+<meta name="description" content="git log for your Claude Code conversations. Local. Fast. No cloud.">
+<meta property="og:title" content="vimgym">
+<meta property="og:description" content="AI session memory for developers. Local. Fast. No cloud.">
+<meta property="og:url" content="https://vimgym.xyz">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void-0:    #060608;
+  --void-1:    #0C0C10;
+  --void-2:    #111118;
+  --void-3:    #18181F;
+  --void-4:    #22222C;
+  --void-5:    #2E2E3A;
+  --matrix:    #00FF41;
+  --matrix-dim:#00CC33;
+  --pink:      #FF078E;
+  --cyan:      #0DF1ED;
+  --cyan-dim:  #0ABFBB;
+  --amber:     #FFB800;
+  --purple:    #BD93F9;
+  --text-hi:   #E8E8F0;
+  --text-mid:  #8888A0;
+  --text-lo:   #44445A;
+  --mono:      'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--void-0);
+  color: var(--text-hi);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.7;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+#matrix-canvas {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wrap {
+  position: relative;
+  z-index: 1;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 60px 24px 80px;
+}
+
+/* ── NAV ── */
+nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 80px;
+}
+
+.logo {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.logo-vim { color: var(--matrix); text-shadow: 0 0 12px var(--matrix), 0 0 24px rgba(0,255,65,0.4); }
+.logo-gym { color: var(--pink);   text-shadow: 0 0 12px var(--pink),   0 0 24px rgba(255,7,142,0.4); }
+
+nav a {
+  color: var(--text-mid);
+  text-decoration: none;
+  font-size: 12px;
+  margin-left: 20px;
+  transition: color 0.15s;
+}
+nav a:hover { color: var(--cyan); }
+
+/* ── HERO ── */
+.hero {
+  text-align: center;
+  margin-bottom: 80px;
+}
+
+.hero-logo {
+  font-size: 88px;
+  font-weight: 900;
+  letter-spacing: -3px;
+  line-height: 1;
+  margin-bottom: 24px;
+}
+.hero-logo .v { color: var(--matrix); text-shadow: 0 0 30px var(--matrix), 0 0 60px rgba(0,255,65,0.4); }
+.hero-logo .g { color: var(--pink);   text-shadow: 0 0 30px var(--pink),   0 0 60px rgba(255,7,142,0.4); }
+
+.tagline {
+  font-size: 14px;
+  color: var(--text-mid);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.subtagline {
+  font-size: 18px;
+  color: var(--text-hi);
+  font-weight: 400;
+  margin-bottom: 40px;
+  line-height: 1.5;
+}
+
+.subtagline .accent { color: var(--cyan); font-weight: 700; }
+
+.glow-line {
+  width: 240px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  margin: 0 auto 40px;
+}
+
+.install-box {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 16px 20px;
+  background: var(--void-2);
+  border: 1px solid var(--pink);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(255,7,142,0.2),
+              0 16px 40px rgba(0,0,0,0.6),
+              0 0 30px rgba(255,7,142,0.1);
+  font-size: 13px;
+  text-align: left;
+  min-width: 360px;
+}
+
+.install-box code {
+  color: var(--text-hi);
+  font-family: var(--mono);
+}
+.install-box code .prompt { color: var(--pink); margin-right: 6px; }
+.install-box .install-label {
+  font-size: 9px;
+  color: var(--text-lo);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.install-box .copy-hint {
+  font-size: 10px;
+  color: var(--text-lo);
+  text-align: right;
+}
+
+.cta-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 24px;
+}
+.cta-row a {
+  display: inline-block;
+  padding: 8px 18px;
+  border: 1px solid var(--void-5);
+  border-radius: 3px;
+  color: var(--text-mid);
+  text-decoration: none;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.cta-row a:hover { border-color: var(--cyan-dim); color: var(--cyan); box-shadow: 0 0 8px rgba(13,241,237,0.12); }
+
+/* ── SECTIONS ── */
+section { margin-bottom: 64px; }
+
+h2 {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--void-3);
+  padding-bottom: 8px;
+}
+
+p { color: var(--text-mid); margin-bottom: 12px; }
+p.lead { color: var(--text-hi); font-size: 15px; }
+
+/* ── FEATURE GRID ── */
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.feature {
+  background: var(--void-2);
+  border: 1px solid var(--void-3);
+  border-radius: 3px;
+  padding: 20px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.feature:hover {
+  border-color: var(--cyan-dim);
+  box-shadow: 0 0 16px rgba(13,241,237,0.08);
+}
+.feature h3 {
+  font-size: 13px;
+  color: var(--cyan);
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+.feature p { font-size: 12px; line-height: 1.6; margin: 0; }
+
+/* ── INSTALL OPTIONS ── */
+.install-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.install-option {
+  background: var(--void-2);
+  border: 1px solid var(--void-3);
+  border-radius: 3px;
+  padding: 16px;
+}
+.install-option h4 {
+  font-size: 10px;
+  color: var(--text-lo);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.install-option pre {
+  background: var(--void-3);
+  border-radius: 2px;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--matrix);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+.install-option pre .prompt { color: var(--pink); }
+
+/* ── SOURCES TABLE ── */
+.sources {
+  border: 1px solid var(--void-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.src-row {
+  display: grid;
+  grid-template-columns: 200px 1fr 100px;
+  padding: 10px 16px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--void-3);
+  align-items: center;
+}
+.src-row:last-child { border-bottom: none; }
+.src-row .src-name { color: var(--cyan); font-weight: 700; }
+.src-row .src-status.on  { color: var(--matrix); }
+.src-row .src-status.off { color: var(--text-lo); }
+
+/* ── FOOTER ── */
+footer {
+  text-align: center;
+  padding-top: 40px;
+  border-top: 1px solid var(--void-3);
+  color: var(--text-lo);
+  font-size: 11px;
+}
+footer a { color: var(--text-mid); text-decoration: none; margin: 0 8px; }
+footer a:hover { color: var(--cyan); }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 720px) {
+  .hero-logo { font-size: 60px; }
+  .features, .install-options { grid-template-columns: 1fr; }
+  .install-box { min-width: auto; width: 100%; }
+  .src-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+mark {
+  background: rgba(255,7,142,0.25);
+  color: var(--pink);
+  padding: 0 2px;
+}
+</style>
+</head>
+<body>
+<canvas id="matrix-canvas"></canvas>
+
+<div class="wrap">
+
+  <nav>
+    <div class="logo">
+      <span class="logo-vim">vim</span><span class="logo-gym">gym</span>
+    </div>
+    <div>
+      <a href="#features">features</a>
+      <a href="#install">install</a>
+      <a href="#sources">sources</a>
+      <a href="https://github.com/shoaibrain/vimgym">github</a>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <div class="hero-logo">
+      <span class="v">vim</span><span class="g">gym</span>
+    </div>
+    <div class="tagline">ai session memory</div>
+    <p class="subtagline">
+      <span class="accent">git log</span> for your Claude Code conversations.<br>
+      Local. Fast. No cloud.
+    </p>
+    <div class="glow-line"></div>
+    <div class="install-box">
+      <span class="install-label">install</span>
+      <code><span class="prompt">$</span>brew install vimgym</code>
+      <span class="copy-hint">macOS · Linux</span>
+    </div>
+    <div class="cta-row">
+      <a href="#install">other install methods</a>
+      <a href="https://github.com/shoaibrain/vimgym">view source</a>
+    </div>
+  </div>
+
+  <section id="features">
+    <h2>What it does</h2>
+    <p class="lead">
+      Every Claude Code session is captured automatically the moment it lands on disk,
+      indexed with full-text search, and made searchable from a local web UI or your
+      terminal. No accounts, no telemetry, no upload. The vault never leaves your machine.
+    </p>
+
+    <div class="features" style="margin-top: 24px">
+      <div class="feature">
+        <h3>⊕ Search</h3>
+        <p>Full-text search across every prompt, response, tool use, and file edit. Find the session where you decided how the auth flow worked.</p>
+      </div>
+      <div class="feature">
+        <h3>⊞ Three-pane UI</h3>
+        <p>Inbox of sessions, sidebar of projects and branches, full conversation rendering with syntax highlighting and copy-to-clipboard.</p>
+      </div>
+      <div class="feature">
+        <h3>● Live capture</h3>
+        <p>A filesystem watcher catches every new session within seconds. Restart your laptop, lose nothing. Sessions persist forever.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>Install</h2>
+    <p>Three ways. Pick the one that matches your setup.</p>
+
+    <div class="install-options" style="margin-top: 16px">
+      <div class="install-option">
+        <h4>homebrew</h4>
+        <pre><span class="prompt">$ </span>brew install vimgym
+<span class="prompt">$ </span>vg start</pre>
+      </div>
+
+      <div class="install-option">
+        <h4>curl</h4>
+        <pre><span class="prompt">$ </span>curl -fsSL \
+  https://vimgym.xyz/install | sh</pre>
+      </div>
+
+      <div class="install-option">
+        <h4>pipx</h4>
+        <pre><span class="prompt">$ </span>pipx install vimgym
+<span class="prompt">$ </span>vg init &amp;&amp; vg start</pre>
+      </div>
+    </div>
+
+    <p style="margin-top:16px;font-size:12px;color:var(--text-lo)">
+      Requires Python 3.11+. macOS and Linux supported. Windows support in v2.
+    </p>
+  </section>
+
+  <section id="sources">
+    <h2>Sources</h2>
+    <p>vimgym auto-detects every AI coding tool installed on your machine. Only Claude Code has a parser in v1; other tools are detected and listed but disabled until their parser ships.</p>
+
+    <div class="sources" style="margin-top: 16px">
+      <div class="src-row">
+        <span class="src-name">Claude Code</span>
+        <span style="color:var(--text-mid)">~/.claude/projects</span>
+        <span class="src-status on">● v1</span>
+      </div>
+      <div class="src-row">
+        <span class="src-name">Cursor</span>
+        <span style="color:var(--text-mid)">~/.cursor</span>
+        <span class="src-status off">○ v2</span>
+      </div>
+      <div class="src-row">
+        <span class="src-name">GitHub Copilot</span>
+        <span style="color:var(--text-mid)">~/.copilot</span>
+        <span class="src-status off">○ v2</span>
+      </div>
+      <div class="src-row">
+        <span class="src-name">Antigravity</span>
+        <span style="color:var(--text-mid)">~/.antigravity</span>
+        <span class="src-status off">○ v2</span>
+      </div>
+      <div class="src-row">
+        <span class="src-name">Gemini CLI</span>
+        <span style="color:var(--text-mid)">~/.gemini</span>
+        <span class="src-status off">○ v2</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Privacy</h2>
+    <p>
+      vimgym binds to <mark>127.0.0.1</mark> only. The vault is a SQLite file at
+      <mark>~/.vimgym/vault.db</mark> with <mark>0600</mark> permissions. A built-in
+      redaction engine scrubs API keys, AWS credentials, kubeconfig certs, JWT tokens,
+      database URLs, PEM blocks, and npm tokens before anything is written.
+      No telemetry. No cloud. No outbound network calls except for the daemon's
+      own filesystem watcher.
+    </p>
+  </section>
+
+  <footer>
+    MIT licensed · made by <a href="https://github.com/shoaibrain">@shoaibrain</a>
+    · <a href="https://github.com/shoaibrain/vimgym">source</a>
+    · <a href="https://github.com/shoaibrain/vimgym/issues">issues</a>
+  </footer>
+
+</div>
+
+<script>
+// Matrix rain — same logic as the app, but at lower density
+(function() {
+  const canvas = document.getElementById('matrix-canvas');
+  const ctx = canvas.getContext('2d');
+  let cols, drops;
+  const chars = 'アイウエオカキクケコサシスセソタチツテト0123456789ABCDEF<>{}[]'.split('');
+
+  function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols = Math.floor(canvas.width / 16);
+    drops = Array(cols).fill(0).map(() => Math.random() * -100);
+  }
+
+  function draw() {
+    ctx.fillStyle = 'rgba(6,6,8,0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#00FF41';
+    ctx.font = '12px JetBrains Mono, monospace';
+    for (let i = 0; i < drops.length; i++) {
+      const ch = chars[Math.floor(Math.random() * chars.length)];
+      ctx.globalAlpha = Math.random() * 0.8 + 0.1;
+      ctx.fillText(ch, i * 16, drops[i] * 16);
+      if (drops[i] * 16 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i] += 0.4;
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  init();
+  window.addEventListener('resize', init);
+  setInterval(draw, 60);
+})();
+
+// Click-to-copy on the install box
+document.querySelector('.install-box').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText('brew install vimgym');
+    const hint = document.querySelector('.install-box .copy-hint');
+    const orig = hint.textContent;
+    hint.textContent = 'copied!';
+    hint.style.color = 'var(--matrix)';
+    setTimeout(() => { hint.textContent = orig; hint.style.color = ''; }, 1500);
+  } catch (_) {}
+});
+</script>
+</body>
+</html>
