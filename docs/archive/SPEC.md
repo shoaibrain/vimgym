@@ -1,3 +1,10 @@
+> **Archived 2026-04-07.** This is the original v1.0 spec & sprint plan that
+> guided the bootstrap of vimgym. The shipped architecture is now documented
+> in [../DEVELOPER.md](../DEVELOPER.md); this file is preserved for historical
+> reference only and is no longer maintained.
+
+---
+
 # Vimgym — Technical Specification & Sprint Plan v1.0
 
 > AI session memory for developers. Local. Fast. No cloud.
