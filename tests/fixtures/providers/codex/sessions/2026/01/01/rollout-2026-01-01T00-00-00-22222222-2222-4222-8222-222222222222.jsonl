@@ -1,0 +1,7 @@
+{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","timestamp":"2026-01-01T00:00:00Z","cwd":"/Users/example/repo","originator":"Codex Desktop","source":"vscode","cli_version":"1.0.0","git":{"branch":"main"}}}
+{"timestamp":"2026-01-01T00:00:01Z","type":"turn_context","payload":{"turn_id":"turn-1","model":"gpt-test","cwd":"/Users/example/repo"}}
+{"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Implement revision-aware capture"}]}}
+{"timestamp":"2026-01-01T00:00:03Z","type":"response_item","payload":{"type":"function_call","call_id":"call-1","name":"exec_command","arguments":"{\"cmd\":\"pytest\"}"}}
+{"timestamp":"2026-01-01T00:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"tests passed"}}
+{"timestamp":"2026-01-01T00:00:05Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Visible validation summary"}]}}
+{"timestamp":"2026-01-01T00:00:06Z","type":"compacted","payload":{"summary":"Visible compaction summary"}}

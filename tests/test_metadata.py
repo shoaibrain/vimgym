@@ -7,7 +7,7 @@ DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edf
 
 
 def test_decode_project_name_from_cwd():
-    assert decode_project_name("-Users-shoaibrain-edforge", "/Users/shoaibrain/edforge") == "edforge"
+    assert decode_project_name("-Users-example-edforge", "/Users/example/edforge") == "edforge"
 
 
 def test_decode_project_name_with_dashes_in_cwd():

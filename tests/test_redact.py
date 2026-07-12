@@ -1,6 +1,9 @@
+import json
 from pathlib import Path
 
-from vimgym.pipeline.redact import RedactionEngine
+import pytest
+
+from vimgym.pipeline.redact import RedactionEngine, RedactionPolicyError
 
 RULES = Path(__file__).parent.parent / "defaults" / "redaction-rules.json"
 
@@ -78,3 +81,32 @@ def test_redact_session_raw_skips_blank_and_malformed():
     raw = '\n{"good": "ok"}\nnot json\n'
     out = e.redact_session_raw(raw)
     assert "good" in out
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        {},
+        {"rules": []},
+        {"rules": [{"name": "", "pattern": "secret", "replacement": "[X]"}]},
+        {"rules": [{"name": "empty", "pattern": "", "replacement": "[X]"}]},
+        {"rules": [{"name": "bad-backref", "pattern": "secret", "replacement": "\\2"}]},
+    ],
+)
+def test_invalid_or_empty_custom_policy_fails_closed(tmp_path, policy):
+    rules = tmp_path / "redaction-rules.json"
+    rules.write_text(json.dumps(policy), encoding="utf-8")
+
+    with pytest.raises(RedactionPolicyError):
+        RedactionEngine(rules)
+
+
+def test_recursive_redaction_and_policy_hash_are_deterministic():
+    first = engine()
+    second = engine()
+    secret = "password=supersecret123"
+
+    assert first.policy_hash == second.policy_hash
+    assert first.redact_value({"nested": [secret, {"key": secret}]}) == {
+        "nested": ["password=[REDACTED]", {"key": "password=[REDACTED]"}]
+    }

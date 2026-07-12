@@ -8,8 +8,11 @@ DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edf
 
 def test_parsed_message_defaults():
     msg = ParsedMessage(
-        uuid="abc", parent_uuid=None, type="user",
-        role="user", timestamp=None,
+        uuid="abc",
+        parent_uuid=None,
+        type="user",
+        role="user",
+        timestamp=None,
     )
     assert msg.has_tool_use is False
     assert msg.tool_names == []
@@ -18,11 +21,19 @@ def test_parsed_message_defaults():
 
 def test_parsed_session_defaults():
     s = ParsedSession(
-        session_uuid="abc", slug=None, ai_title=None, last_prompt=None,
-        source_path="/tmp/x.jsonl", project_dir="-Users-test",
-        cwd=None, git_branch=None, entrypoint=None,
-        claude_version=None, permission_mode=None,
-        started_at=None, ended_at=None,
+        session_uuid="abc",
+        slug=None,
+        ai_title=None,
+        last_prompt=None,
+        source_path="/tmp/x.jsonl",
+        project_dir="-Users-test",
+        cwd=None,
+        git_branch=None,
+        entrypoint=None,
+        claude_version=None,
+        permission_mode=None,
+        started_at=None,
+        ended_at=None,
     )
     assert s.tools_used == []
     assert s.has_subagents is False

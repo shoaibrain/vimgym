@@ -1,0 +1,1 @@
+Read docs/backup.md and confirmed the restore contract is whole-vault and atomic.

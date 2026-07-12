@@ -1,4 +1,4 @@
-"""Sprint 5 — /api/config and /api/config/sources endpoints."""
+"""V0.2 source configuration API contracts."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,10 +13,22 @@ def client(tmp_path):
     cfg = AppConfig(
         vault_dir=tmp_path,
         sources=[
-            SourceConfig(id="claude_code", name="Claude Code", type="claude_code",
-                         path=str(tmp_path / "fake-claude"), enabled=True, auto_detected=True),
-            SourceConfig(id="cursor", name="Cursor", type="unknown",
-                         path=str(tmp_path / "fake-cursor"), enabled=False, auto_detected=True),
+            SourceConfig(
+                id="claude_code",
+                name="Claude Code",
+                type="claude_code",
+                path=str(tmp_path / "fake-claude"),
+                enabled=True,
+                auto_detected=True,
+            ),
+            SourceConfig(
+                id="cursor",
+                name="Cursor",
+                type="unknown",
+                path=str(tmp_path / "fake-cursor"),
+                enabled=False,
+                auto_detected=True,
+            ),
         ],
     )
     (tmp_path / "fake-claude").mkdir()
@@ -32,7 +44,7 @@ def test_get_config(client):
     assert r.status_code == 200
     body = r.json()
     assert body["server_host"] == "127.0.0.1"
-    assert body["schema_version"] == 1
+    assert body["schema_version"] == 2
 
 
 def test_get_sources(client):
@@ -68,3 +80,13 @@ def test_patch_unknown_source_404(client):
     c, _ = client
     r = c.patch("/api/config/sources/nope", json={"enabled": True})
     assert r.status_code == 404
+
+
+def test_unsupported_source_metadata_cannot_be_enabled(client):
+    c, cfg = client
+
+    response = c.patch("/api/config/sources/cursor", json={"enabled": True})
+
+    assert response.status_code == 400
+    assert "unsupported source type" in response.json()["detail"]
+    assert next(source for source in cfg.sources if source.id == "cursor").enabled is False

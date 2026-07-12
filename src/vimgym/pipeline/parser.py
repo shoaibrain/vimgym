@@ -1,4 +1,5 @@
-"""Claude Code JSONL parser — converts raw session files to structured data."""
+"""Legacy Claude JSONL parser retained as a v0.1 compatibility bridge."""
+
 from __future__ import annotations
 
 import hashlib
@@ -11,14 +12,14 @@ from pathlib import Path
 class ParsedMessage:
     uuid: str
     parent_uuid: str | None
-    type: str                     # 'user' | 'assistant'
+    type: str  # 'user' | 'assistant'
     role: str
     timestamp: str | None
     has_tool_use: bool = False
     has_thinking: bool = False
     has_image: bool = False
     tool_names: list[str] = field(default_factory=list)
-    content_json: str = "[]"      # full content array as JSON, base64 images stripped
+    content_json: str = "[]"  # full content array as JSON, base64 images stripped
 
 
 @dataclass
@@ -31,12 +32,12 @@ class ParsedSession:
 
     # Source
     source_path: str
-    project_dir: str              # raw encoded: -Users-shoaibrain-edforge
-    cwd: str | None               # /Users/shoaibrain/edforge
+    project_dir: str  # raw encoded: -Users-example-edforge
+    cwd: str | None  # /Users/example/edforge
     git_branch: str | None
-    entrypoint: str | None        # claude-vscode
-    claude_version: str | None    # 2.1.89
-    permission_mode: str | None   # default | plan
+    entrypoint: str | None  # claude-vscode
+    claude_version: str | None  # 2.1.89
+    permission_mode: str | None  # default | plan
 
     # Time (ISO8601 strings)
     started_at: str | None
@@ -64,8 +65,8 @@ class ParsedSession:
     parse_errors: list[str] = field(default_factory=list)
 
     # Provenance — which configured source this came from. Set by the
-    # orchestrator just before upsert_session(); defaults to "claude_code"
-    # for v1 since that's the only parser type.
+    # compatibility orchestrator just before upsert_session(). New capture uses
+    # the built-in provider adapters instead.
     source_id: str = "claude_code"
 
 
@@ -77,9 +78,11 @@ def parse_session(filepath: Path) -> ParsedSession:
     user messages with isMeta=true. Computes file_hash from raw bytes before
     any modification.
     """
-    raw_bytes = filepath.read_bytes()
-    file_hash = hashlib.sha256(raw_bytes).hexdigest()
-    raw_lines = raw_bytes.decode("utf-8", errors="replace").splitlines()
+    digest = hashlib.sha256()
+    with filepath.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    file_hash = digest.hexdigest()
 
     project_dir = filepath.parent.name
 
@@ -104,169 +107,29 @@ def parse_session(filepath: Path) -> ParsedSession:
     files_modified: set[str] = set()
     user_texts: list[str] = []
     asst_texts: list[str] = []
-    redacted_lines: list[str] = []
-
-    for line_num, raw_line in enumerate(raw_lines, 1):
-        line = raw_line.strip()
-        if not line:
-            redacted_lines.append(raw_line)
-            continue
-
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as e:
-            session.parse_errors.append(f"line {line_num}: {e}")
-            redacted_lines.append(raw_line)
-            continue
-
-        msg_type = obj.get("type", "")
-
-        if msg_type == "queue-operation":
-            if obj.get("operation") == "enqueue" and session.started_at is None:
-                session.started_at = obj.get("timestamp")
-            if not session.session_uuid and obj.get("sessionId"):
-                session.session_uuid = obj["sessionId"]
-            redacted_lines.append(line)
-
-        elif msg_type == "user":
-            if obj.get("isMeta"):
-                redacted_lines.append(line)
-                continue
-
-            if not session.session_uuid and obj.get("sessionId"):
-                session.session_uuid = obj["sessionId"]
-            if not session.cwd and obj.get("cwd"):
-                session.cwd = obj["cwd"]
-            if not session.git_branch and obj.get("gitBranch"):
-                session.git_branch = obj["gitBranch"]
-            if not session.entrypoint and obj.get("entrypoint"):
-                session.entrypoint = obj["entrypoint"]
-            if not session.claude_version and obj.get("version"):
-                session.claude_version = obj["version"]
-            if not session.slug and obj.get("slug"):
-                session.slug = obj["slug"]
-            if not session.permission_mode and obj.get("permissionMode"):
-                session.permission_mode = obj["permissionMode"]
-
-            timestamp = obj.get("timestamp")
-            if timestamp:
-                if session.started_at is None:
-                    session.started_at = timestamp
-                session.ended_at = timestamp
-
-            content = obj.get("message", {}).get("content", [])
-            if not isinstance(content, list):
-                content = []
-            cleaned_content, has_image, text_parts = _process_content_blocks(content, for_user=True)
-            user_texts.extend(text_parts)
-
-            msg = ParsedMessage(
-                uuid=obj.get("uuid", f"_line_{line_num}"),
-                parent_uuid=obj.get("parentUuid"),
-                type="user",
-                role="user",
-                timestamp=timestamp,
-                has_image=has_image,
-                content_json=json.dumps(cleaned_content),
+    with filepath.open("r", encoding="utf-8", errors="replace") as source:
+        raw_lines = enumerate(source, 1)
+        for line_num, raw_line in raw_lines:
+            # A provider can be writing the final JSON object while discovery
+            # runs. Keep that object out of the committed revision until a
+            # terminating newline makes it stable.
+            if not raw_line.endswith("\n"):
+                session.parse_errors.append(f"line {line_num}: incomplete trailing line")
+                break
+            _parse_line(
+                session,
+                raw_line,
+                line_num,
+                tools_used,
+                files_modified,
+                user_texts,
+                asst_texts,
             )
-            session.messages.append(msg)
 
-            obj_copy = dict(obj)
-            if isinstance(obj_copy.get("message"), dict):
-                obj_copy["message"] = dict(obj_copy["message"])
-                obj_copy["message"]["content"] = cleaned_content
-            redacted_lines.append(json.dumps(obj_copy))
-
-        elif msg_type == "assistant":
-            if not session.session_uuid and obj.get("sessionId"):
-                session.session_uuid = obj["sessionId"]
-
-            timestamp = obj.get("timestamp")
-            if timestamp:
-                if session.started_at is None:
-                    session.started_at = timestamp
-                session.ended_at = timestamp
-
-            usage = obj.get("message", {}).get("usage", {}) or {}
-            session.input_tokens += usage.get("input_tokens", 0) or 0
-            session.output_tokens += usage.get("output_tokens", 0) or 0
-            session.cache_read_tokens += usage.get("cache_read_input_tokens", 0) or 0
-            session.cache_write_tokens += usage.get("cache_creation_input_tokens", 0) or 0
-
-            content = obj.get("message", {}).get("content", [])
-            if not isinstance(content, list):
-                content = []
-            cleaned_content, has_image, _ = _process_content_blocks(content, for_user=False)
-
-            has_tool_use = False
-            has_thinking = False
-            msg_tools: list[str] = []
-
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                btype = block.get("type")
-                if btype == "tool_use":
-                    has_tool_use = True
-                    tool_name = block.get("name", "")
-                    tools_used.add(tool_name)
-                    msg_tools.append(tool_name)
-                    if tool_name in ("Write", "Edit"):
-                        # Real Claude Code uses `file_path`, fallback to `path`.
-                        inp = block.get("input", {}) or {}
-                        path = inp.get("file_path") or inp.get("path") or ""
-                        if path:
-                            files_modified.add(path)
-                    if tool_name == "Agent":
-                        session.has_subagents = True
-                elif btype == "thinking":
-                    has_thinking = True
-                elif btype == "text":
-                    asst_texts.append(block.get("text", ""))
-
-            msg = ParsedMessage(
-                uuid=obj.get("uuid", f"_line_{line_num}"),
-                parent_uuid=obj.get("parentUuid"),
-                type="assistant",
-                role="assistant",
-                timestamp=timestamp,
-                has_tool_use=has_tool_use,
-                has_thinking=has_thinking,
-                has_image=has_image,
-                tool_names=msg_tools,
-                content_json=json.dumps(cleaned_content),
-            )
-            session.messages.append(msg)
-
-            obj_copy = dict(obj)
-            if isinstance(obj_copy.get("message"), dict):
-                obj_copy["message"] = dict(obj_copy["message"])
-                obj_copy["message"]["content"] = cleaned_content
-            redacted_lines.append(json.dumps(obj_copy))
-
-        elif msg_type == "file-history-snapshot":
-            snapshot = obj.get("snapshot", {}) or {}
-            for file_path in (snapshot.get("trackedFileBackups", {}) or {}).keys():
-                files_modified.add(file_path)
-            redacted_lines.append(line)
-
-        elif msg_type == "ai-title":
-            session.ai_title = obj.get("aiTitle")
-            if not session.session_uuid and obj.get("sessionId"):
-                session.session_uuid = obj["sessionId"]
-            redacted_lines.append(line)
-
-        elif msg_type == "last-prompt":
-            session.last_prompt = obj.get("lastPrompt")
-            if not session.session_uuid and obj.get("sessionId"):
-                session.session_uuid = obj["sessionId"]
-            redacted_lines.append(line)
-
-        else:
-            session.parse_errors.append(f"line {line_num}: unknown type '{msg_type}'")
-            redacted_lines.append(line)
-
-    session.raw_jsonl = "\n".join(redacted_lines)
+    # Legacy attribute retained for callers that inspect it. It is an explicit
+    # marker rather than a copy of provider-native JSONL; v2 never persists raw
+    # source records.
+    session.raw_jsonl = '{"raw_provider_data":"omitted"}'
     session.user_messages_text = "\n\n".join(user_texts)
     session.asst_messages_text = "\n\n".join(asst_texts)
     session.tools_used = sorted(tools_used)
@@ -275,9 +138,152 @@ def parse_session(filepath: Path) -> ParsedSession:
     return session
 
 
-def _process_content_blocks(
-    content: list, for_user: bool
-) -> tuple[list, bool, list[str]]:
+def _parse_line(
+    session: ParsedSession,
+    raw_line: str,
+    line_num: int,
+    tools_used: set[str],
+    files_modified: set[str],
+    user_texts: list[str],
+    asst_texts: list[str],
+) -> None:
+    line = raw_line.strip()
+    if not line:
+        return
+
+    try:
+        obj = json.loads(line)
+    except json.JSONDecodeError as e:
+        session.parse_errors.append(f"line {line_num}: {e}")
+        return
+
+    msg_type = obj.get("type", "")
+
+    if msg_type == "queue-operation":
+        if obj.get("operation") == "enqueue" and session.started_at is None:
+            session.started_at = obj.get("timestamp")
+        if not session.session_uuid and obj.get("sessionId"):
+            session.session_uuid = obj["sessionId"]
+    elif msg_type == "user":
+        if obj.get("isMeta"):
+            return
+
+        if not session.session_uuid and obj.get("sessionId"):
+            session.session_uuid = obj["sessionId"]
+        if not session.cwd and obj.get("cwd"):
+            session.cwd = obj["cwd"]
+        if not session.git_branch and obj.get("gitBranch"):
+            session.git_branch = obj["gitBranch"]
+        if not session.entrypoint and obj.get("entrypoint"):
+            session.entrypoint = obj["entrypoint"]
+        if not session.claude_version and obj.get("version"):
+            session.claude_version = obj["version"]
+        if not session.slug and obj.get("slug"):
+            session.slug = obj["slug"]
+        if not session.permission_mode and obj.get("permissionMode"):
+            session.permission_mode = obj["permissionMode"]
+
+        timestamp = obj.get("timestamp")
+        if timestamp:
+            if session.started_at is None:
+                session.started_at = timestamp
+            session.ended_at = timestamp
+
+        content = obj.get("message", {}).get("content", [])
+        if not isinstance(content, list):
+            content = []
+        cleaned_content, has_image, text_parts = _process_content_blocks(content, for_user=True)
+        user_texts.extend(text_parts)
+
+        msg = ParsedMessage(
+            uuid=obj.get("uuid", f"_line_{line_num}"),
+            parent_uuid=obj.get("parentUuid"),
+            type="user",
+            role="user",
+            timestamp=timestamp,
+            has_image=has_image,
+            content_json=json.dumps(cleaned_content),
+        )
+        session.messages.append(msg)
+
+    elif msg_type == "assistant":
+        if not session.session_uuid and obj.get("sessionId"):
+            session.session_uuid = obj["sessionId"]
+
+        timestamp = obj.get("timestamp")
+        if timestamp:
+            if session.started_at is None:
+                session.started_at = timestamp
+            session.ended_at = timestamp
+
+        usage = obj.get("message", {}).get("usage", {}) or {}
+        session.input_tokens += usage.get("input_tokens", 0) or 0
+        session.output_tokens += usage.get("output_tokens", 0) or 0
+        session.cache_read_tokens += usage.get("cache_read_input_tokens", 0) or 0
+        session.cache_write_tokens += usage.get("cache_creation_input_tokens", 0) or 0
+
+        content = obj.get("message", {}).get("content", [])
+        if not isinstance(content, list):
+            content = []
+        cleaned_content, has_image, _ = _process_content_blocks(content, for_user=False)
+
+        has_tool_use = False
+        has_thinking = False
+        msg_tools: list[str] = []
+
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "tool_use":
+                has_tool_use = True
+                tool_name = block.get("name", "")
+                tools_used.add(tool_name)
+                msg_tools.append(tool_name)
+                if tool_name in ("Write", "Edit"):
+                    # Real Claude Code uses `file_path`, fallback to `path`.
+                    inp = block.get("input", {}) or {}
+                    path = inp.get("file_path") or inp.get("path") or ""
+                    if path:
+                        files_modified.add(path)
+                if tool_name == "Agent":
+                    session.has_subagents = True
+            elif btype == "thinking":
+                has_thinking = True
+            elif btype == "text":
+                asst_texts.append(block.get("text", ""))
+
+        msg = ParsedMessage(
+            uuid=obj.get("uuid", f"_line_{line_num}"),
+            parent_uuid=obj.get("parentUuid"),
+            type="assistant",
+            role="assistant",
+            timestamp=timestamp,
+            has_tool_use=has_tool_use,
+            has_thinking=has_thinking,
+            has_image=has_image,
+            tool_names=msg_tools,
+            content_json=json.dumps(cleaned_content),
+        )
+        session.messages.append(msg)
+
+    elif msg_type == "file-history-snapshot":
+        snapshot = obj.get("snapshot", {}) or {}
+        for file_path in (snapshot.get("trackedFileBackups", {}) or {}).keys():
+            files_modified.add(file_path)
+    elif msg_type == "ai-title":
+        session.ai_title = obj.get("aiTitle")
+        if not session.session_uuid and obj.get("sessionId"):
+            session.session_uuid = obj["sessionId"]
+    elif msg_type == "last-prompt":
+        session.last_prompt = obj.get("lastPrompt")
+        if not session.session_uuid and obj.get("sessionId"):
+            session.session_uuid = obj["sessionId"]
+    else:
+        session.parse_errors.append(f"line {line_num}: unknown type '{msg_type}'")
+
+
+def _process_content_blocks(content: list, for_user: bool) -> tuple[list, bool, list[str]]:
     """Strip base64 image data; collect text parts for FTS.
 
     Returns (cleaned_content, has_image, text_parts).

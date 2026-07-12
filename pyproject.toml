@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vimgym"
-version = "0.1.1"
-description = "AI session memory for developers — local, fast, no cloud"
+version = "0.2.0"
+description = "Local, redacted Claude Code and Codex session search and backup"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "Shoaib Rain"}]
-keywords = ["claude", "claude-code", "ai", "session", "memory", "search", "developer-tools", "local-first"]
+keywords = ["claude", "claude-code", "codex", "ai", "session", "memory", "search", "developer-tools", "local-first"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Utilities",
@@ -45,6 +46,11 @@ dev = [
     "mypy",
     "build",
     "twine",
+    "pytest-cov",
+    "pip-audit",
+]
+browser = [
+    "playwright>=1.50",
 ]
 
 [project.urls]
@@ -67,7 +73,6 @@ vimgym = [
     "ui/index.html",
     "ui/style.css",
     "ui/app.js",
-    "ui/vendor/highlight.min.js",
     "defaults/redaction-rules.json",
     "defaults/config.json",
 ]
@@ -78,3 +83,11 @@ line-length = 100
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["vimgym"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

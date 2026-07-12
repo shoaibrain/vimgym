@@ -1,103 +1,248 @@
-name: release
+name: immutable release
 
 on:
-  release:
-    types: [published]
+  push:
+    # GitHub ref filters use glob syntax, not regular expressions.  The exact
+    # stable-version shape is enforced before any privileged release action.
+    tags: ["v*.*.*"]
 
-# We never want two releases racing.
 concurrency:
-  group: release
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  # ───────────────────────── 1. Build & publish to PyPI ─────────────────────────
-  pypi:
-    name: build & publish to PyPI
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/vimgym
+  build-once:
+    name: verify tag and build once
+    runs-on: ubuntu-24.04
     permissions:
-      id-token: write   # required for PyPI Trusted Publishing (OIDC)
-      contents: write   # required to upload artifacts + attestations to the GitHub Release
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
-
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+      - name: Require an annotated immutable tag
+        run: |
+          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = tag
+      - id: commit
+        run: echo "sha=$(git rev-list -n1 "${GITHUB_REF_NAME}")" >> "$GITHUB_OUTPUT"
+      - name: Require successful complete CI and release-candidate runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.commit.outputs.sha }}
+        run: |
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${COMMIT}&status=completed&per_page=100" \
+            > ci-runs.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/nightly.yml/runs?head_sha=${COMMIT}&status=completed&per_page=100" \
+            > release-candidate-runs.json
+          python - <<'PY'
+          import json, os
+          commit = os.environ["COMMIT"]
+          for workflow, path in (
+              ("ci.yml", "ci-runs.json"),
+              ("nightly.yml", "release-candidate-runs.json"),
+          ):
+              runs = json.load(open(path, encoding="utf-8"))["workflow_runs"]
+              matching = [run for run in runs if run["head_sha"] == commit]
+              if not any(run["conclusion"] == "success" for run in matching):
+                  states = [(run["id"], run["conclusion"]) for run in matching]
+                  raise SystemExit(
+                      f"tagged commit has no successful complete {workflow} run: {states}"
+                  )
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install build tooling
+          cache: pip
+      - run: python -m pip install --upgrade pip build twine
+      - id: version
+        name: Verify every version surface
         run: |
-          python -m pip install --upgrade pip
-          pip install build twine
-
-      - name: Verify version matches tag
+          VERSION="${GITHUB_REF_NAME#v}"
+          PYPROJECT=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          INIT=$(python -c 'exec(open("src/vimgym/__init__.py").read()); print(__version__)')
+          test "$VERSION" = "$PYPROJECT"
+          test "$VERSION" = "$INIT"
+          grep -F "## [$VERSION]" CHANGELOG.md
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - run: python -m build
+      - run: twine check dist/*
+      - name: Create immutable hashes and release manifest
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          COMMIT: ${{ steps.commit.outputs.sha }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PYPROJECT_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "([^"]+)"/\1/')
-          INIT_VERSION=$(grep -m1 '__version__' src/vimgym/__init__.py | sed -E 's/.*"([^"]+)".*/\1/')
-          echo "tag=$TAG  pyproject=$PYPROJECT_VERSION  __init__=$INIT_VERSION"
-          if [ "$TAG" != "$PYPROJECT_VERSION" ] || [ "$TAG" != "$INIT_VERSION" ]; then
-            echo "::error::version mismatch — refuse to publish"
-            exit 1
-          fi
-
-      - name: Build sdist + wheel
-        run: python -m build
-
-      - name: Validate artifacts
-        run: |
-          twine check dist/*
-          # Belt-and-braces: confirm bundled defaults are inside the wheel.
-          unzip -l dist/vimgym-*.whl | grep -F "vimgym/defaults/redaction-rules.json"
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          cd dist
+          sha256sum vimgym-* > SHA256SUMS
+          python - <<'PY'
+          import hashlib, json, os, pathlib
+          files = []
+          for path in sorted(pathlib.Path('.').glob('vimgym-*')):
+              files.append({"name": path.name, "size": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+          pathlib.Path('release-manifest.json').write_text(json.dumps({
+              "version": os.environ["VERSION"], "tag": "v" + os.environ["VERSION"],
+              "commit": os.environ["COMMIT"], "files": files,
+          }, indent=2, sort_keys=True) + "\n")
+          PY
+          mkdir pypi
+          cp vimgym-*.whl vimgym-*.tar.gz pypi/
+      - uses: actions/attest-build-provenance@v2
         with:
-          print-hash: true
-          # Idempotent: a re-run of the same release tag is a no-op rather
-          # than a hard failure. Lets us recover from post-publish errors
-          # (e.g. asset upload, attestation) without having to burn a
-          # version number.
-          skip-existing: true
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist-${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Upload artifacts to GitHub Release
+  publish:
+    name: publish identical bytes
+    needs: build-once
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vimgym
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist-${{ github.ref_name }}
+          path: dist
+      - name: Verify downloaded bytes
+        run: cd dist && sha256sum -c SHA256SUMS
+      - name: Create draft GitHub release and upload without clobber
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
-
-  # ───────────────────────── 2. Bump the Homebrew tap ─────────────────────────
-  bump-homebrew:
-    name: bump homebrew tap
-    needs: pypi
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for PyPI to serve the new version
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag --draft --generate-notes --title "${GITHUB_REF_NAME}"
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/vimgym-* dist/SHA256SUMS dist/release-manifest.json \
+            --repo "${GITHUB_REPOSITORY}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > github-release.json
+          python - <<'PY'
+          import hashlib, json, pathlib
+          paths = [
+              *sorted(pathlib.Path("dist").glob("vimgym-*.whl")),
+              *sorted(pathlib.Path("dist").glob("vimgym-*.tar.gz")),
+              pathlib.Path("dist/SHA256SUMS"),
+              pathlib.Path("dist/release-manifest.json"),
+          ]
+          expected = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in paths
+          }
+          assets = {item['name']: item.get('digest') for item in json.load(open('github-release.json'))['assets']}
+          for name, digest in expected.items():
+              if assets.get(name) != f"sha256:{digest}":
+                  raise SystemExit(f"GitHub asset digest mismatch for {name}")
+          PY
+      - name: Publish the same wheel and sdist to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/pypi/
+          print-hash: true
+          attestations: true
+      - name: Verify PyPI hashes against SHA256SUMS
+        env:
+          VERSION: ${{ needs.build-once.outputs.version }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          for i in $(seq 1 30); do
-            if curl -fsS "https://pypi.org/pypi/vimgym/${VERSION}/json" >/dev/null; then
-              echo "✓ vimgym ${VERSION} is live on PyPI"
-              exit 0
-            fi
-            echo "[$i/30] waiting for PyPI..."
+          python - <<'PY'
+          import json, os, pathlib, time, urllib.request
+          expected = {line.split()[1].lstrip('*'): line.split()[0] for line in pathlib.Path('dist/SHA256SUMS').read_text().splitlines()}
+          for _ in range(30):
+              with urllib.request.urlopen(f"https://pypi.org/pypi/vimgym/{os.environ['VERSION']}/json") as response:
+                  payload = json.load(response)
+              actual = {item['filename']: item['digests']['sha256'] for item in payload['urls']}
+              unexpected = sorted(set(actual) - set(expected))
+              if unexpected:
+                  raise SystemExit(f"unexpected PyPI distribution files: {unexpected}")
+              mismatched = [name for name in actual if actual[name] != expected.get(name)]
+              if mismatched:
+                  raise SystemExit(f"PyPI hash mismatch for {mismatched}")
+              if actual == expected:
+                  break
+              time.sleep(10)
+          else:
+              raise SystemExit("PyPI did not expose every distribution in time")
+          PY
+      - name: Publish the already-uploaded GitHub draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
+
+  homebrew-pr:
+    name: open verified Homebrew formula PR
+    needs: [build-once, publish]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Wait for immutable PyPI sdist
+        env:
+          VERSION: ${{ needs.build-once.outputs.version }}
+        run: |
+          for attempt in $(seq 1 30); do
+            curl -fsS "https://pypi.org/pypi/vimgym/${VERSION}/json" >/dev/null && exit 0
             sleep 10
           done
-          echo "::error::Timed out waiting for PyPI to publish ${VERSION}"
           exit 1
-
-      - name: Bump tap formula
-        uses: dawidd6/action-homebrew-bump-formula@v4
+      - uses: dawidd6/action-homebrew-bump-formula@v8
         with:
-          # Fine-grained PAT scoped to shoaibrain/homebrew-vimgym only:
-          #   Contents: read/write, Pull requests: read/write
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: shoaibrain/homebrew-vimgym
+          tap: shoaibrain/vimgym
           formula: vimgym
-          tag: ${{ github.event.release.tag_name }}
-          revision: ${{ github.event.release.target_commitish }}
+          tag: ${{ github.ref_name }}
           force: false
+      - name: Require the formula PR's macOS install tests
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ needs.build-once.outputs.version }}
+        run: |
+          for attempt in $(seq 1 30); do
+            gh api "repos/shoaibrain/homebrew-vimgym/pulls?state=open&per_page=100" \
+              > homebrew-prs.json
+            PR=$(python - <<'PY'
+          import json, os
+          version = os.environ["VERSION"]
+          matches = [
+              str(item["number"])
+              for item in json.load(open("homebrew-prs.json", encoding="utf-8"))
+              if "vimgym" in (item["title"] + " " + item["head"]["ref"]).lower()
+              and version in (item["title"] + " " + item["head"]["ref"])
+          ]
+          if len(matches) == 1:
+              print(matches[0])
+          PY
+            )
+            if [ -n "$PR" ]; then
+              break
+            fi
+            sleep 10
+          done
+          test -n "$PR"
+          for attempt in $(seq 1 30); do
+            COUNT=$(gh pr checks "$PR" --repo shoaibrain/homebrew-vimgym \
+              --json name --jq 'length' 2>/dev/null || true)
+            if [ "${COUNT:-0}" -gt 0 ]; then
+              break
+            fi
+            sleep 10
+          done
+          test "${COUNT:-0}" -gt 0
+          gh pr checks "$PR" --repo shoaibrain/homebrew-vimgym --watch --fail-fast

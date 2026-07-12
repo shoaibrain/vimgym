@@ -1,4 +1,5 @@
 """Vimgym CLI — AI session memory for developers."""
+
 from __future__ import annotations
 
 import argparse
@@ -20,7 +21,7 @@ def _make_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    sub.add_parser("init",   help="Initialize vault and detect AI tool sources")
+    sub.add_parser("init", help="Initialize vault and detect AI tool sources")
 
     start_p = sub.add_parser("start", help="Start daemon (watcher + web server)")
     start_p.add_argument(
@@ -30,24 +31,43 @@ def _make_parser() -> argparse.ArgumentParser:
         help="Do not open the browser on start (use for background services)",
     )
 
-    sub.add_parser("stop",   help="Stop daemon")
+    sub.add_parser("stop", help="Stop daemon")
     sub.add_parser("status", help="Show daemon status and vault stats")
-    sub.add_parser("open",   help="Open browser UI")
-    sub.add_parser("doctor", help="Run system diagnostics")
+    sub.add_parser("open", help="Open browser UI")
+    doctor_p = sub.add_parser("doctor", help="Run system diagnostics")
+    doctor_p.add_argument("--json", action="store_true", dest="as_json")
 
     search_p = sub.add_parser("search", help="Search sessions")
     search_p.add_argument("query", nargs="?", help="Search query")
     search_p.add_argument("--project", help="Filter by project name")
     search_p.add_argument("--branch", help="Filter by git branch")
     search_p.add_argument("--since", help="Filter by date (ISO or Nd: 7d, 30d)")
+    search_p.add_argument("--provider", choices=("claude_code", "codex"))
+    search_p.add_argument("--session-type", choices=("user", "automation", "subagent", "unknown"))
+    search_p.add_argument("--lifecycle", choices=("active", "archived"))
     search_p.add_argument("--limit", type=int, default=20)
     search_p.add_argument("--json", action="store_true", dest="as_json")
+
+    reindex_p = sub.add_parser("reindex", help="Rebuild selected artifacts")
+    reindex_p.add_argument("--provider", choices=("claude_code", "codex"))
+    reindex_p.add_argument("--session", help="Internal, native, or unique prefix session ID")
+
+    backup_p = sub.add_parser("backup", help="Create, verify, or restore a portable backup")
+    backup_sub = backup_p.add_subparsers(dest="backup_cmd", metavar="SUBCOMMAND")
+    backup_create = backup_sub.add_parser("create", help="Create and verify a .vgbak archive")
+    backup_create.add_argument("destination", metavar="DEST")
+    backup_verify = backup_sub.add_parser("verify", help="Verify a .vgbak archive")
+    backup_verify.add_argument("archive", metavar="ARCHIVE")
+    backup_restore = backup_sub.add_parser("restore", help="Restore a whole vault")
+    backup_restore.add_argument("archive", metavar="ARCHIVE")
+    backup_restore.add_argument("--to", required=True, dest="destination", metavar="VAULT_DIR")
+    backup_restore.add_argument("--replace", action="store_true")
 
     config_p = sub.add_parser("config", help="View or modify configuration")
     config_sub = config_p.add_subparsers(dest="config_cmd", metavar="SUBCOMMAND")
     sources_p = config_sub.add_parser("sources", help="List configured AI tool sources")
     sources_p.add_argument("source_id", nargs="?", help="Source id to enable/disable")
-    sources_p.add_argument("--enable",  action="store_true")
+    sources_p.add_argument("--enable", action="store_true")
     sources_p.add_argument("--disable", action="store_true")
 
     return parser
@@ -73,9 +93,13 @@ def main() -> None:
     if cmd == "open":
         sys.exit(_cmd_open())
     if cmd == "doctor":
-        sys.exit(_cmd_doctor())
+        sys.exit(_cmd_doctor(args))
     if cmd == "search":
         sys.exit(_cmd_search(args))
+    if cmd == "reindex":
+        sys.exit(_cmd_reindex(args))
+    if cmd == "backup":
+        sys.exit(_cmd_backup(args))
     if cmd == "config":
         sys.exit(_cmd_config(args))
 
@@ -88,40 +112,46 @@ def main() -> None:
 
 def _console():
     from rich.console import Console
+
     return Console()
 
 
 def _load_cfg():
     from vimgym.config import load_config
+
     return load_config()
 
 
 def _cmd_init() -> int:
     """Initialize the vault, detect sources, persist config."""
-    from vimgym.config import init_vault
+    from vimgym.config import FutureConfigError, init_vault
 
     console = _console()
     cfg = _load_cfg()
-    cfg, newly_detected = init_vault(cfg)
+    try:
+        cfg, _ = init_vault(cfg)
+    except FutureConfigError as exc:
+        console.print(f"[red]initialization refused:[/red] {exc}")
+        return 1
 
     console.print(f"[green]✓ vault initialized[/green] {cfg.vault_dir}")
     if not cfg.sources:
-        console.print("[yellow]⚠ no AI tool directories detected in $HOME[/yellow]")
-        console.print("  Edit ~/.vimgym/config.json to add a source manually.")
+        console.print("[yellow]⚠ no Claude Code or Codex session roots detected[/yellow]")
+        console.print("  Start a supported provider or configure one of its session roots.")
         return 0
 
     console.print()
     console.print("[bold]Detected sources:[/bold]")
     for s in cfg.sources:
-        if s.enabled:
-            mark, status, color = "✓", "enabled", "green"
-            note = ""
-        elif s.type == "claude_code":
+        if not s.supported:
             mark, status, color = "⊘", "disabled", "yellow"
+            note = "  unsupported metadata"
+        elif s.enabled:
+            mark, status, color = "✓", "enabled", "green"
             note = ""
         else:
             mark, status, color = "⊘", "disabled", "yellow"
-            note = "  parser coming in v2"
+            note = ""
         console.print(
             f"  [{color}]{mark}[/{color}]  {s.name:<20} {s.path:<30} [{color}][{status}][/{color}]{note}"
         )
@@ -132,25 +162,47 @@ def _cmd_init() -> int:
 
 
 def _cmd_start(args: argparse.Namespace | None = None) -> int:
-    from vimgym.config import init_vault
+    from vimgym.config import (
+        CONFIG_SCHEMA_VERSION,
+        FutureConfigError,
+        SourceConfig,
+        init_vault,
+        stored_config_schema,
+    )
     from vimgym.daemon import is_running, start_daemon
 
     console = _console()
     cfg = _load_cfg()
 
+    _warn_if_ephemeral_install(console)
+
+    # Keep a v1 config untouched until the child has successfully migrated the
+    # database. This preserves a working v0.1.1 rollback pair if migration
+    # fails. The foreground child persists v2 config only after init_db().
+    persisted_schema = stored_config_schema(cfg.vault_dir)
+    if persisted_schema is not None and persisted_schema > CONFIG_SCHEMA_VERSION:
+        console.print(
+            f"[red]start refused:[/red] config schema v{persisted_schema} is newer "
+            f"than supported v{CONFIG_SCHEMA_VERSION}"
+        )
+        return 1
+    if persisted_schema is not None and persisted_schema < CONFIG_SCHEMA_VERSION:
+        newly: list[SourceConfig] = []
+    else:
+        try:
+            cfg, newly = init_vault(cfg)
+        except FutureConfigError as exc:
+            console.print(f"[red]start refused:[/red] {exc}")
+            return 1
+    if newly:
+        console.print(f"[dim]auto-initialized vault, detected {len(newly)} source(s)[/dim]")
     if args is not None and getattr(args, "no_browser", False):
         cfg.auto_open_browser = False
 
-    _warn_if_ephemeral_install(console)
-
-    # Auto-init on first run.
-    if not cfg.sources or not (cfg.vault_dir / "config.json").exists():
-        cfg, newly = init_vault(cfg)
-        if newly:
-            console.print(f"[dim]auto-initialized vault, detected {len(newly)} source(s)[/dim]")
-
     if is_running(cfg):
-        console.print(f"[yellow]vimgym already running[/yellow] on http://{cfg.server_host}:{cfg.server_port}")
+        console.print(
+            f"[yellow]vimgym already running[/yellow] on http://{cfg.server_host}:{cfg.server_port}"
+        )
         return 0
 
     try:
@@ -159,7 +211,9 @@ def _cmd_start(args: argparse.Namespace | None = None) -> int:
         console.print(f"[red]start failed:[/red] {e}")
         return 1
 
-    console.print(f"[green]vimgym started[/green] (pid {pid}) on http://{cfg.server_host}:{cfg.server_port}")
+    console.print(
+        f"[green]vimgym started[/green] (pid {pid}) on http://{cfg.server_host}:{cfg.server_port}"
+    )
     console.print(f"  vault:    {cfg.vault_dir}")
     enabled = cfg.enabled_sources
     if enabled:
@@ -204,10 +258,12 @@ def _warn_if_ephemeral_install(console) -> None:
         console.print()
         console.print("[yellow]⚠  vg is running from a project virtualenv[/yellow]")
         console.print(f"   [dim]{vg_path}[/dim]")
-        console.print("   This shell session needs `source .venv/bin/activate` after every restart.")
+        console.print(
+            "   This shell session needs `source .venv/bin/activate` after every restart."
+        )
         console.print("   For a permanent install:")
         console.print("     [cyan]brew install shoaibrain/vimgym/vimgym[/cyan]   (macOS)")
-        console.print("     [cyan]pipx install vimgym[/cyan]                     (any OS)")
+        console.print("     [cyan]pipx install vimgym[/cyan]                     (macOS/Linux)")
         console.print()
 
 
@@ -241,14 +297,23 @@ def _cmd_status() -> int:
         table.add_row("pid", str(pid))
         table.add_row("url", f"http://{cfg.server_host}:{cfg.server_port}")
     table.add_row("vault", str(cfg.vault_dir))
-    table.add_row("watching", str(cfg.watch_path))
+    enabled_sources = [source for source in cfg.sources if source.supported and source.enabled]
+    if enabled_sources:
+        for index, source in enumerate(enabled_sources):
+            state = "active" if source.exists() else "path missing"
+            table.add_row(
+                "watching" if index == 0 else "",
+                f"{source.expanded_path} ({source.id}; {state})",
+            )
+    else:
+        table.add_row("watching", "no enabled sources")
 
     if cfg.db_path.exists():
         try:
             conn = get_connection(cfg.db_path)
             stats = get_stats(conn)
             table.add_row("sessions", str(stats.total_sessions))
-            table.add_row("db size",  f"{stats.db_size_bytes / 1024 / 1024:.1f} MB")
+            table.add_row("db size", f"{stats.db_size_bytes / 1024 / 1024:.1f} MB")
         except Exception as e:
             table.add_row("db", f"[red]error: {e}[/red]")
     else:
@@ -275,13 +340,16 @@ def _cmd_open() -> int:
 # ───────────────────────── doctor ─────────────────────────
 
 
-def _cmd_doctor() -> int:
+def _cmd_doctor(args: argparse.Namespace | None = None) -> int:
     """System diagnostic. Exit 0 if all green, 1 if any red issues."""
     import shutil
     import sqlite3
 
     console = _console()
     cfg = _load_cfg()
+
+    if args is not None and getattr(args, "as_json", False):
+        return _cmd_doctor_json(cfg)
 
     OK = "[green]✓[/green]"
     WARN = "[yellow]⊘[/yellow]"
@@ -328,9 +396,7 @@ def _cmd_doctor() -> int:
     if vg_path:
         console.print(f"  {OK}  vg binary  [dim]{vg_path}[/dim]")
         if ".venv" in vg_path or "/venv/" in vg_path:
-            console.print(
-                f"  {WARN}  vg lives inside a virtualenv — won't survive shell restart"
-            )
+            console.print(f"  {WARN}  vg lives inside a virtualenv — won't survive shell restart")
     else:
         console.print(f"  {WARN}  vg binary not on $PATH (running from module?)")
 
@@ -393,6 +459,7 @@ def _cmd_doctor() -> int:
     # ── daemon ──
     console.print("  [dim]daemon[/dim]")
     from vimgym.daemon import get_pid, is_running
+
     if is_running(cfg):
         console.print(f"  {OK}  daemon running (pid {get_pid(cfg)})")
         console.print(f"      [dim]http://{cfg.server_host}:{cfg.server_port}[/dim]")
@@ -407,25 +474,23 @@ def _cmd_doctor() -> int:
         console.print(f"  {WARN}  no sources configured  —  run [cyan]vg init[/cyan]")
     for s in cfg.sources:
         exists = s.exists()
-        parser_avail = s.type == "claude_code"
+        parser_avail = s.supported
 
         if s.enabled and exists and parser_avail:
             icon = OK
             note = "enabled"
-        elif s.enabled and not exists:
+        elif parser_avail and not exists:
             icon = FAIL
-            note = "enabled but path missing"
-            issues.append(f"Source '{s.id}' is enabled but path does not exist: {s.path}")
+            note = "enabled but path missing" if s.enabled else "disabled; path missing"
+            issues.append(f"Source '{s.id}' path does not exist: {s.path}")
         elif not parser_avail:
             icon = WARN
-            note = "parser coming v2"
+            note = "unsupported provider"
         else:
             icon = WARN
             note = "disabled"
 
-        console.print(
-            f"  {icon}  {s.id:<14} [dim]{s.path}[/dim]  ({note})"
-        )
+        console.print(f"  {icon}  {s.id:<14} [dim]{s.path}[/dim]  ({note})")
 
     console.print()
 
@@ -433,13 +498,16 @@ def _cmd_doctor() -> int:
     console.print("  [dim]redaction[/dim]")
     try:
         from vimgym.pipeline.redact import RedactionEngine
+
         engine = RedactionEngine(cfg.rules_path)
         if engine.rule_count > 0:
             source = "vault" if cfg.rules_path.exists() else "bundled defaults"
             console.print(f"  {OK}  {engine.rule_count} patterns loaded ({source})")
         else:
             console.print(f"  {FAIL}  no redaction rules loaded")
-            issues.append("No redaction rules available — secrets will not be stripped from sessions.")
+            issues.append(
+                "No redaction rules available — secrets will not be stripped from sessions."
+            )
     except Exception as e:
         console.print(f"  {FAIL}  redaction engine failed: {e}")
         issues.append(f"Redaction engine error: {e}")
@@ -457,6 +525,137 @@ def _cmd_doctor() -> int:
     console.print("  [green]no issues found[/green]")
     console.print()
     return 0
+
+
+def _cmd_doctor_json(cfg) -> int:
+    """Machine-readable vault/source health for automation and support."""
+    import shutil
+    import sqlite3
+
+    from vimgym.daemon import get_pid, is_running
+    from vimgym.db import SCHEMA_VERSION
+
+    issues: list[dict[str, str]] = []
+    sources: list[dict[str, object]] = []
+    stored_sources: dict[str, dict[str, object]] = {}
+    db_health: dict[str, object] = {
+        "exists": cfg.db_path.exists(),
+        "schema_version": None,
+        "integrity": None,
+        "sessions": 0,
+    }
+    if cfg.db_path.exists():
+        conn = None
+        try:
+            conn = sqlite3.connect(f"file:{cfg.db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if schema_version == 0:
+                config_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='config'"
+                ).fetchone()
+                if config_table:
+                    row = conn.execute(
+                        "SELECT value FROM config WHERE key='schema_version'"
+                    ).fetchone()
+                    schema_version = int(row[0]) if row else 0
+            db_health["schema_version"] = schema_version
+            db_health["integrity"] = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            if schema_version > SCHEMA_VERSION:
+                issues.append(
+                    {
+                        "code": "future_schema",
+                        "message": (
+                            f"Vault schema v{schema_version} is newer than supported "
+                            f"v{SCHEMA_VERSION}; the vault was not modified"
+                        ),
+                    }
+                )
+            else:
+                db_health["sessions"] = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                if schema_version < SCHEMA_VERSION:
+                    issues.append(
+                        {
+                            "code": "schema_upgrade_required",
+                            "message": (
+                                f"Vault schema v{schema_version} requires migration to "
+                                f"v{SCHEMA_VERSION} by running vg start"
+                            ),
+                        }
+                    )
+                else:
+                    db_health["artifacts"] = {
+                        row[0]: int(row[1])
+                        for row in conn.execute(
+                            "SELECT status,COUNT(*) FROM source_artifacts GROUP BY status"
+                        )
+                    }
+                    stored_sources = {
+                        str(row["id"]): dict(row)
+                        for row in conn.execute(
+                            """
+                            SELECT id,health,diagnostic_count,last_error,last_seen_at,
+                                   last_indexed_at FROM sources
+                            """
+                        )
+                    }
+        except Exception as exc:
+            db_health["integrity"] = "error"
+            issues.append({"code": "vault_unreadable", "message": str(exc)[:500]})
+        finally:
+            if conn is not None:
+                conn.close()
+    for source in cfg.sources:
+        stored = stored_sources.get(source.id, {})
+        raw_diagnostic_count = stored.get("diagnostic_count", 0)
+        diagnostic_count = raw_diagnostic_count if isinstance(raw_diagnostic_count, int) else 0
+        item: dict[str, object] = {
+            "id": source.id,
+            "provider": source.type,
+            "path": source.path,
+            "enabled": source.enabled,
+            "exists": source.exists(),
+            "parser_available": source.supported,
+            "health": stored.get("health", "unknown"),
+            "diagnostic_count": diagnostic_count,
+            "last_error": stored.get("last_error"),
+            "last_seen_at": stored.get("last_seen_at"),
+            "last_indexed_at": stored.get("last_indexed_at"),
+        }
+        sources.append(item)
+        if source.supported and not source.exists():
+            issues.append(
+                {
+                    "code": "source_missing",
+                    "message": (
+                        f"Configured source is missing: {source.id} "
+                        f"({'enabled' if source.enabled else 'disabled'})"
+                    ),
+                }
+            )
+        if stored.get("health") in {"degraded", "failed"}:
+            issues.append(
+                {
+                    "code": "source_unhealthy",
+                    "message": f"Source {source.id} health is {stored['health']}",
+                }
+            )
+    report = {
+        "ok": not issues,
+        "version": __version__,
+        "python": ".".join(map(str, sys.version_info[:3])),
+        "sqlite": sqlite3.sqlite_version,
+        "schema_supported": SCHEMA_VERSION,
+        "daemon": {"running": is_running(cfg), "pid": get_pid(cfg)},
+        "vault": db_health,
+        "sources": sources,
+        "disk_free_bytes": shutil.disk_usage(
+            cfg.vault_dir if cfg.vault_dir.exists() else Path.home()
+        ).free,
+        "issues": issues,
+    }
+    print(_json.dumps(report, indent=2, default=str))
+    return 0 if not issues else 1
 
 
 def _cmd_search(args: argparse.Namespace) -> int:
@@ -491,6 +690,12 @@ def _search_via_api(cfg, args: argparse.Namespace) -> list[dict]:
         params["branch"] = args.branch
     if args.since:
         params["since"] = args.since
+    if args.provider:
+        params["provider"] = args.provider
+    if args.session_type:
+        params["kind"] = args.session_type
+    if args.lifecycle:
+        params["lifecycle"] = args.lifecycle
 
     url = f"http://{cfg.server_host}:{cfg.server_port}/api/search"
     try:
@@ -499,7 +704,8 @@ def _search_via_api(cfg, args: argparse.Namespace) -> list[dict]:
     except Exception as e:
         print(f"warning: API request failed ({e}); falling back to direct DB", file=sys.stderr)
         return _search_via_db(cfg, args)
-    return r.json().get("results", [])
+    body = r.json()
+    return body.get("items", body.get("results", []))
 
 
 def _search_via_db(cfg, args: argparse.Namespace) -> list[dict]:
@@ -516,20 +722,31 @@ def _search_via_db(cfg, args: argparse.Namespace) -> list[dict]:
         project=args.project,
         branch=args.branch,
         since=args.since,
+        provider=args.provider,
+        kind=args.session_type,
+        lifecycle=args.lifecycle,
         limit=args.limit,
     )
-    return [
-        {
-            "session_uuid": r.session_uuid,
-            "project_name": r.project_name,
-            "ai_title": r.ai_title,
-            "started_at": r.started_at,
-            "duration_secs": r.duration_secs,
-            "git_branch": r.git_branch,
-            "snippet": r.snippet,
+    rows = []
+    for result in results:
+        item = {
+            "id": result.id,
+            "provider": result.provider,
+            "kind": result.kind,
+            "lifecycle": result.lifecycle,
+            "project_name": result.project_name,
+            "title": result.title,
+            "ai_title": result.ai_title,
+            "started_at": result.started_at,
+            "duration_secs": result.duration_secs,
+            "git_branch": result.git_branch,
+            "snippet": result.snippet,
+            "snippet_parts": result.snippet_parts,
         }
-        for r in results
-    ]
+        if result.provider == "claude_code":
+            item["session_uuid"] = result.session_uuid
+        rows.append(item)
+    return rows
 
 
 def _print_search_table(results: list[dict], query: str) -> None:
@@ -543,6 +760,8 @@ def _print_search_table(results: list[dict], query: str) -> None:
     table = Table(title=f"Results for {query!r}", show_lines=False)
     table.add_column("DATE", style="dim")
     table.add_column("ID")
+    table.add_column("PROVIDER")
+    table.add_column("TYPE")
     table.add_column("PROJECT")
     table.add_column("BRANCH", style="cyan")
     table.add_column("DUR", justify="right")
@@ -550,15 +769,88 @@ def _print_search_table(results: list[dict], query: str) -> None:
 
     for r in results:
         date = (r.get("started_at") or "")[:10]
-        uid = (r.get("session_uuid") or "")[:8]
+        uid = (r.get("id") or r.get("session_uuid") or "")[:8]
+        provider = r.get("provider") or ""
+        kind = r.get("kind") or ""
         proj = r.get("project_name") or ""
         branch = r.get("git_branch") or ""
         dur = r.get("duration_secs")
-        dur_str = f"{int(dur)//60}m" if dur else "-"
-        title = (r.get("ai_title") or "")[:60]
-        table.add_row(date, uid, proj, branch, dur_str, title)
+        dur_str = f"{int(dur) // 60}m" if dur else "-"
+        title = (r.get("title") or r.get("ai_title") or "")[:60]
+        table.add_row(date, uid, provider, kind, proj, branch, dur_str, title)
 
     console.print(table)
+
+
+def _cmd_reindex(args: argparse.Namespace) -> int:
+    from vimgym.db import get_connection, init_db
+    from vimgym.ingestion import reindex_vault
+    from vimgym.storage.queries import AmbiguousIDError, get_session
+
+    cfg = _load_cfg()
+    init_db(cfg.db_path)
+    internal_id = None
+    if args.session:
+        try:
+            row = get_session(get_connection(cfg.db_path), args.session)
+        except AmbiguousIDError as exc:
+            print(
+                f"error: session prefix is ambiguous ({', '.join(exc.matches)})",
+                file=sys.stderr,
+            )
+            return 2
+        if row is None:
+            print("error: session not found", file=sys.stderr)
+            return 1
+        internal_id = row["id"]
+    counts = reindex_vault(cfg, provider=args.provider, session_id=internal_id)
+    print(_json.dumps(counts, indent=2))
+    return 1 if counts.get("failed") else 0
+
+
+def _cmd_backup(args: argparse.Namespace) -> int:
+    from vimgym.backup import BackupError, create_backup, restore_backup, verify_backup
+
+    cfg = _load_cfg()
+    subcommand = getattr(args, "backup_cmd", None)
+    if subcommand is None:
+        print("error: backup requires create, verify, or restore", file=sys.stderr)
+        return 2
+    try:
+        if subcommand == "create":
+            if not cfg.db_path.exists():
+                print("error: vault not initialized", file=sys.stderr)
+                return 1
+            created = create_backup(cfg.vault_dir, Path(args.destination).expanduser())
+            print(f"backup created: {created.path}")
+            print(
+                f"schema: v{created.schema_version}; sessions: {created.counts.get('sessions', 0)}"
+            )
+            return 0
+        if subcommand == "verify":
+            verified = verify_backup(Path(args.archive).expanduser())
+            print(f"backup verified: {verified.path}")
+            print(
+                f"schema: v{verified.schema_version}; sessions: {verified.counts.get('sessions', 0)}"
+            )
+            return 0
+        if subcommand == "restore":
+            destination = Path(args.destination).expanduser()
+            restored = restore_backup(
+                Path(args.archive).expanduser(),
+                destination,
+                replace=bool(args.replace),
+            )
+            print(f"vault restored: {restored.vault_dir}")
+            if restored.rollback_backup:
+                print(f"rollback backup: {restored.rollback_backup}")
+            for source in restored.missing_sources:
+                print(f"warning: restored source is missing: {source}", file=sys.stderr)
+            return 0
+    except (BackupError, OSError, ValueError) as exc:
+        print(f"backup error: {exc}", file=sys.stderr)
+        return 1
+    return 2
 
 
 def _cmd_config(args: argparse.Namespace) -> int:
@@ -573,12 +865,13 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
     # Default `vg config` — print active config summary.
     from rich.table import Table
+
     table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_row("vault",  str(cfg.vault_dir))
+    table.add_row("vault", str(cfg.vault_dir))
     table.add_row("server", f"{cfg.server_host}:{cfg.server_port}")
-    table.add_row("logs",   str(cfg.log_path))
-    table.add_row("rules",  str(cfg.rules_path))
-    table.add_row("sources",f"{len(cfg.sources)} configured, {len(cfg.enabled_sources)} active")
+    table.add_row("logs", str(cfg.log_path))
+    table.add_row("rules", str(cfg.rules_path))
+    table.add_row("sources", f"{len(cfg.sources)} configured, {len(cfg.enabled_sources)} active")
     console.print(table)
     console.print()
     console.print("[dim]Run [cyan]vg config sources[/cyan] for source details.[/dim]")
@@ -595,6 +888,12 @@ def _cmd_config_sources(args: argparse.Namespace, cfg, console, save_config) -> 
     if target_id and (enable or disable):
         for s in cfg.sources:
             if s.id == target_id:
+                if enable and not s.supported:
+                    console.print(
+                        f"[red]source '{target_id}' is compatibility metadata; "
+                        "v0.2 has no parser for its type[/red]"
+                    )
+                    return 2
                 s.enabled = bool(enable)
                 save_config(cfg)
                 state = "[green]enabled[/green]" if enable else "[yellow]disabled[/yellow]"
@@ -609,7 +908,9 @@ def _cmd_config_sources(args: argparse.Namespace, cfg, console, save_config) -> 
         return 2
 
     if not cfg.sources:
-        console.print("[yellow]no sources configured.[/yellow] Run [cyan]vg init[/cyan] to detect them.")
+        console.print(
+            "[yellow]no sources configured.[/yellow] Run [cyan]vg init[/cyan] to detect them."
+        )
         return 0
 
     table = Table(title="vimgym sources", title_style="bold cyan")
@@ -619,19 +920,21 @@ def _cmd_config_sources(args: argparse.Namespace, cfg, console, save_config) -> 
     table.add_column("parser")
 
     for s in cfg.sources:
-        if s.enabled and s.exists():
+        if not s.supported:
+            status = "[dim]○ off[/dim]"
+        elif s.enabled and s.exists():
             status = "[green]● on[/green]"
         elif s.enabled:
             status = "[yellow]● on (path missing)[/yellow]"
         else:
             status = "[dim]○ off[/dim]"
-        parser_state = "[green]available[/green]" if s.type == "claude_code" else "[yellow]coming v2[/yellow]"
+        parser_state = "[green]available[/green]" if s.supported else "[dim]metadata only[/dim]"
         table.add_row(s.id, s.path, status, parser_state)
 
     console.print(table)
     console.print()
     console.print("[dim]To enable: [cyan]vg config sources <id> --enable[/cyan][/dim]")
-    console.print("[dim]Note: Only claude_code parser is available in v1.[/dim]")
+    console.print("[dim]Built-in parsers: claude_code and codex.[/dim]")
     return 0
 
 

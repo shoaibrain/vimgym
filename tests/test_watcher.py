@@ -1,11 +1,18 @@
+import queue
 import shutil
 import time
 from pathlib import Path
 
-
 from vimgym.config import AppConfig, SourceConfig
 from vimgym.db import get_connection, init_db
-from vimgym.watcher import _is_session_file, backfill, start_watching
+from vimgym.events import event_queue
+from vimgym.watcher import (
+    _is_session_file,
+    backfill,
+    resume_watching,
+    start_watching,
+    stop_watching,
+)
 
 
 def _cfg_with_watch(vault: Path, watch: Path, **overrides) -> AppConfig:
@@ -24,6 +31,7 @@ def _cfg_with_watch(vault: Path, watch: Path, **overrides) -> AppConfig:
         **overrides,
     )
 
+
 REAL = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
 
@@ -36,9 +44,9 @@ def test_filter_rejects_non_jsonl():
     assert _is_session_file("/path/abc.json") is False
 
 
-def test_filter_rejects_companion_dirs():
-    assert _is_session_file("/path/-Users-foo/abc/subagents/agent-1.jsonl") is False
-    assert _is_session_file("/path/-Users-foo/abc/tool-results/x.jsonl") is False
+def test_filter_accepts_subagents_but_rejects_multiplexed_journals():
+    assert _is_session_file("/path/-Users-foo/abc/subagents/agent-1.jsonl") is True
+    assert _is_session_file("/path/-Users-foo/abc/subagents/workflow/journal.jsonl") is False
 
 
 def test_filter_rejects_dotfiles():
@@ -130,3 +138,72 @@ def test_watcher_debounces_rapid_modifications(tmp_path):
     finally:
         observer.stop()
         observer.join(timeout=2)
+
+
+def test_default_append_reaches_search_and_event_within_release_budget(tmp_path):
+    watch = tmp_path / "watch"
+    project = watch / "-Users-example-edforge"
+    project.mkdir(parents=True)
+    cfg = _cfg_with_watch(tmp_path / "vault", watch)
+    init_db(cfg.db_path)
+    while True:
+        try:
+            event_queue.get_nowait()
+        except queue.Empty:
+            break
+
+    observer, _handlers = start_watching(cfg)
+    started = time.monotonic()
+    saw_event = False
+    searchable = False
+    try:
+        source = REAL / "eaa3009a-c5ab-4015-a3e5-af26622652f9.jsonl"
+        shutil.copy(source, project / source.name)
+        conn = get_connection(cfg.db_path)
+        deadline = started + 12.0
+        while time.monotonic() < deadline:
+            try:
+                event = event_queue.get_nowait()
+                saw_event = saw_event or event.get("type") == "session_created"
+            except queue.Empty:
+                pass
+            searchable = conn.execute("SELECT COUNT(*) FROM message_fts").fetchone()[0] > 0
+            if saw_event and searchable:
+                break
+            time.sleep(0.05)
+        assert saw_event
+        assert searchable
+        assert time.monotonic() - started <= 12.0
+    finally:
+        stop_watching(observer)
+
+
+def test_paused_startup_watcher_queues_until_reconciliation_finishes(tmp_path):
+    watch = tmp_path / "watch"
+    project = watch / "-Users-example-edforge"
+    project.mkdir(parents=True)
+    cfg = _cfg_with_watch(
+        tmp_path / "vault",
+        watch,
+        debounce_secs=0.1,
+        stability_polls=1,
+        stability_poll_interval=0.01,
+    )
+    init_db(cfg.db_path)
+    observer, _handlers = start_watching(cfg, paused=True)
+    try:
+        source = REAL / "eaa3009a-c5ab-4015-a3e5-af26622652f9.jsonl"
+        shutil.copy(source, project / source.name)
+        time.sleep(0.5)
+        conn = get_connection(cfg.db_path)
+        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+
+        resume_watching(observer)
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1:
+                break
+            time.sleep(0.05)
+        assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+    finally:
+        stop_watching(observer)

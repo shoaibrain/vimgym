@@ -4,13 +4,13 @@ import sys
 
 def run(args):
     return subprocess.run(
-        [sys.executable, "-m", "vimgym.cli"] + args,
-        capture_output=True, text=True
+        [sys.executable, "-m", "vimgym.cli"] + args, capture_output=True, text=True
     )
 
 
 def test_version():
     from vimgym import __version__
+
     r = run(["--version"])
     assert r.returncode == 0
     assert __version__ in r.stdout
@@ -29,6 +29,33 @@ def test_status_runs(tmp_path, monkeypatch):
     r = run(["status"])
     assert r.returncode == 0
     assert "stopped" in r.stdout or "running" in r.stdout
+
+
+def test_status_lists_every_enabled_source(tmp_path, monkeypatch):
+    from vimgym.config import AppConfig, SourceConfig, save_config
+
+    claude = tmp_path / "claude-projects"
+    codex = tmp_path / "codex-sessions"
+    claude.mkdir()
+    codex.mkdir()
+    cfg = AppConfig(
+        vault_dir=tmp_path,
+        sources=[
+            SourceConfig("claude_code", "Claude Code", "claude_code", str(claude)),
+            SourceConfig("codex_active", "Codex active", "codex", str(codex)),
+        ],
+    )
+    save_config(cfg)
+    monkeypatch.setenv("VIMGYM_PATH", str(tmp_path))
+    monkeypatch.setenv("COLUMNS", "300")
+
+    result = run(["status"])
+
+    assert result.returncode == 0
+    assert str(claude) in result.stdout
+    assert str(codex) in result.stdout
+    assert "claude_code" in result.stdout
+    assert "codex_active" in result.stdout
 
 
 def test_stop_when_not_running(tmp_path, monkeypatch):

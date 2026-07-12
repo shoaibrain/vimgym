@@ -1,4 +1,5 @@
 """Daemon process manager: PID file, start/stop, foreground runner."""
+
 from __future__ import annotations
 
 import logging
@@ -13,11 +14,11 @@ from pathlib import Path
 
 import uvicorn
 
-from vimgym.config import AppConfig, save_config
+from vimgym.config import AppConfig, init_vault
 from vimgym.db import init_db
 from vimgym.events import publish
 from vimgym.server import create_app
-from vimgym.watcher import backfill, start_watching
+from vimgym.watcher import backfill, resume_watching, start_watching, stop_watching
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 # Log rotation: cap each file at 5 MB, keep 5 backups (~25 MB total).
 _LOG_MAX_BYTES = 5 * 1024 * 1024
 _LOG_BACKUP_COUNT = 5
+_STARTUP_TIMEOUT_SECS = 10 * 60.0
+_STARTUP_POLL_SECS = 0.1
 
 
 def _configure_logging(config: AppConfig) -> None:
@@ -56,9 +59,7 @@ def _configure_logging(config: AppConfig) -> None:
         backupCount=_LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root.addHandler(handler)
 
     # Quiet uvicorn's own loggers and force them to propagate to our root
@@ -124,13 +125,22 @@ def run_foreground(config: AppConfig) -> int:
     config.log_path.parent.mkdir(parents=True, exist_ok=True)
     _configure_logging(config)
     init_db(config.db_path)
-    save_config(config)
+    # Persist/detect sources only after database migration succeeds so a failed
+    # v1→v2 attempt leaves both the old database and old config rollback-ready.
+    config, _ = init_vault(config)
 
-    # Backfill before starting the watcher so we don't double-process.
+    # Reconcile once, establish the observer while its worker is paused, then
+    # reconcile again to close the scan-to-watch race. Queued events resume
+    # afterward and become cheap unchanged checks.
     n = backfill(config)
-    logger.info("backfill processed %d new files", n)
-
-    observer, _handlers = start_watching(config)
+    observer, _handlers = start_watching(config, paused=True)
+    try:
+        n += backfill(config)
+    except Exception:
+        stop_watching(observer)
+        raise
+    resume_watching(observer)
+    logger.info("startup backfill processed %d changed artifacts after reconciliation", n)
 
     app = create_app(config)
     server = uvicorn.Server(
@@ -159,8 +169,7 @@ def run_foreground(config: AppConfig) -> int:
         server.run()
     finally:
         try:
-            observer.stop()
-            observer.join(timeout=3)
+            stop_watching(observer)
         except Exception:
             logger.exception("observer shutdown failed")
         # Wake the websocket pump so it doesn't block forever.
@@ -175,7 +184,7 @@ def run_foreground(config: AppConfig) -> int:
 def start_daemon(config: AppConfig) -> int:
     """Spawn the foreground runner as a detached background process.
 
-    Returns the child PID. Raises RuntimeError if already running.
+    Return only after this exact child serves a healthy HTTP response.
     """
     if is_running(config):
         raise RuntimeError(f"daemon already running (pid {_read_pid(config.pid_path)})")
@@ -188,48 +197,80 @@ def start_daemon(config: AppConfig) -> int:
     env = os.environ.copy()
     env["VIMGYM_PATH"] = str(config.vault_dir)
     env["VIMGYM_PORT"] = str(config.server_port)
-    # NOTE: do NOT forward VIMGYM_WATCH_PATH to the child. Since schema v2,
-    # the child reads its on-disk config from VIMGYM_PATH, which already
-    # contains the full sources[] list. Forwarding the env var would
-    # collapse multi-source configs to a single 'env_override' entry.
-    # If the user explicitly set it in their parent shell (dev workflow),
-    # os.environ.copy() above already preserved it.
+    # The child reads the complete sources[] list from the persisted v2 config.
+    # A parent-shell compatibility override must not collapse that list when the
+    # detached process reloads configuration.
+    env.pop("VIMGYM_WATCH_PATH", None)
 
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "vimgym.daemon", "--run-foreground"],
-        stdout=log_fh,
-        stderr=log_fh,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-        env=env,
-    )
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "vimgym.daemon", "--run-foreground"],
+            stdout=log_fh,
+            stderr=log_fh,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            env=env,
+        )
+    finally:
+        log_fh.close()
 
     config.pid_path.write_text(str(proc.pid))
 
-    # Wait briefly to confirm it actually started (didn't immediately exit).
-    for _ in range(20):
-        time.sleep(0.1)
-        if proc.poll() is not None:
-            try:
-                config.pid_path.unlink()
-            except OSError:
-                pass
+    deadline = time.monotonic() + _STARTUP_TIMEOUT_SECS
+    while True:
+        returncode = proc.poll()
+        if returncode is not None:
+            _remove_pid_file(config)
             raise RuntimeError(
-                f"daemon exited immediately with code {proc.returncode}; "
-                f"see {config.log_path}"
+                f"daemon exited before becoming ready with code {returncode}; see {config.log_path}"
             )
         if _server_responding(config):
-            break
+            return proc.pid
+        if time.monotonic() >= deadline:
+            _stop_failed_start(proc)
+            _remove_pid_file(config)
+            raise RuntimeError(
+                f"daemon did not become ready within {_STARTUP_TIMEOUT_SECS:g} seconds; "
+                f"see {config.log_path}"
+            )
+        time.sleep(_STARTUP_POLL_SECS)
 
-    return proc.pid
+
+def _remove_pid_file(config: AppConfig) -> None:
+    try:
+        config.pid_path.unlink()
+    except OSError:
+        pass
+
+
+def _stop_failed_start(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
 
 
 def _server_responding(config: AppConfig) -> bool:
-    import socket
+    import httpx
+
     try:
-        with socket.create_connection((config.server_host, config.server_port), timeout=0.2):
-            return True
-    except OSError:
+        response = httpx.get(
+            f"http://{config.server_host}:{config.server_port}/health",
+            timeout=0.2,
+        )
+        body = response.json()
+        expected_pid = _read_pid(config.pid_path)
+        return (
+            response.status_code == 200
+            and body.get("status") == "ok"
+            and expected_pid is not None
+            and body.get("pid") == expected_pid
+        )
+    except (httpx.HTTPError, ValueError):
         return False
 
 
@@ -274,6 +315,7 @@ def stop_daemon(config: AppConfig) -> bool:
 def main() -> int:
     if "--run-foreground" in sys.argv:
         from vimgym.config import load_config
+
         return run_foreground(load_config())
     print("vimgym daemon: use `vg start` instead", file=sys.stderr)
     return 1

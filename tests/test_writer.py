@@ -28,8 +28,8 @@ def _back_up(tmp_path, name):
 def test_insert_populates_all_tables(tmp_path):
     conn, s = _back_up(tmp_path, "eaa3009a-c5ab-4015-a3e5-af26622652f9.jsonl")
     assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM sessions_raw").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM sessions_fts").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM message_blocks").fetchone()[0] > 0
+    assert conn.execute("SELECT COUNT(*) FROM message_fts").fetchone()[0] > 0
     assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] > 0
     assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 1
 
@@ -48,13 +48,17 @@ def test_reinsert_idempotent(tmp_path):
     upsert_session(conn, s, meta, heuristic_summary(s))
     conn.commit()
     assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
-    assert conn.execute("SELECT COUNT(*) FROM sessions_fts").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM message_fts").fetchone()[0] > 0
 
 
 def test_fts_searchable_by_project(tmp_path):
     conn, _ = _back_up(tmp_path, "eaa3009a-c5ab-4015-a3e5-af26622652f9.jsonl")
     rows = conn.execute(
-        "SELECT session_uuid FROM sessions_fts WHERE sessions_fts MATCH ?",
+        """
+        SELECT DISTINCT s.external_session_id session_uuid FROM message_fts f
+        JOIN message_blocks b ON b.rowid=f.rowid
+        JOIN sessions s ON s.id=b.session_id WHERE message_fts MATCH ?
+        """,
         ("edforge",),
     ).fetchall()
     assert len(rows) == 1
