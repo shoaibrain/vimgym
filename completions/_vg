@@ -11,6 +11,8 @@ _vg() {
     'open:Open browser UI'
     'doctor:Run system diagnostics'
     'search:Search sessions'
+    'reindex:Rebuild selected provider artifacts'
+    'backup:Create, verify, or restore a portable backup'
     'config:View or modify configuration'
   )
 
@@ -37,10 +39,30 @@ _vg() {
             '--project[Filter by project name]:project' \
             '--branch[Filter by git branch]:branch' \
             '--since[Filter by date (ISO or Nd: 7d, 30d)]:since' \
+            '--provider[Filter by provider]:provider:(claude_code codex)' \
+            '--session-type[Filter by session type]:type:(user automation subagent unknown)' \
+            '--lifecycle[Filter by lifecycle]:lifecycle:(active archived)' \
             '--limit[Maximum results]:limit' \
             '--json[Output as JSON]' \
             '--help[Show help]' \
             '*:query'
+          ;;
+        doctor)
+          _arguments '--json[Output machine-readable diagnostics]'
+          ;;
+        reindex)
+          _arguments \
+            '--provider[Reindex one provider]:provider:(claude_code codex)' \
+            '--session[Reindex one session]:session'
+          ;;
+        backup)
+          local -a backup_subs
+          backup_subs=(
+            'create:Create and verify a portable backup'
+            'verify:Verify a portable backup'
+            'restore:Restore a whole vault'
+          )
+          _describe -t commands 'backup subcommand' backup_subs
           ;;
         config)
           local -a config_subs

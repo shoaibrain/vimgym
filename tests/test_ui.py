@@ -1,4 +1,5 @@
-"""Sprint 4 web UI tests — static file serving + new endpoints."""
+"""V0.2 web UI static-file and export contracts."""
+
 from pathlib import Path
 
 import pytest
@@ -49,11 +50,8 @@ def test_app_js_served(client):
     assert "openCommandPalette" in r.text
 
 
-def test_highlight_js_served(client):
-    r = client.get("/vendor/highlight.min.js")
-    assert r.status_code == 200
-    # highlight.js sources include the keyword "hljs"
-    assert "hljs" in r.text
+def test_unused_legacy_highlight_js_is_not_served(client):
+    assert client.get("/vendor/highlight.min.js").status_code == 404
 
 
 # ── Design tokens & no-CDN guarantees ───────────────────────────────────
@@ -71,15 +69,13 @@ def test_no_external_urls_in_app_js(client):
         assert cdn not in r.text, f"external CDN reference found: {cdn}"
 
 
-def test_no_cdn_in_index_html_except_fonts(client):
-    """Only Google Fonts CDN allowed in index.html."""
+def test_no_external_assets_in_index_html(client):
+    """The vault browser is entirely self-hosted and works offline."""
     import re
 
     r = client.get("/")
     external = re.findall(r'(?:src|href)="(https?://[^"]+)"', r.text)
-    for url in external:
-        assert "fonts.googleapis.com" in url or "fonts.gstatic.com" in url, \
-            f"unexpected external URL in index.html: {url}"
+    assert external == []
 
 
 # ── New API endpoints ───────────────────────────────────────────────────

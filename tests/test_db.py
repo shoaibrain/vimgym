@@ -16,11 +16,22 @@ def test_all_tables_exist(tmp_path):
     db = tmp_path / "vault.db"
     init_db(db)
     conn = get_connection(db)
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type IN ('table','index')"
-    ).fetchall()
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','index')").fetchall()
     names = {r["name"] for r in rows}
-    for required in ("sessions", "sessions_fts", "sessions_raw", "messages", "projects", "config"):
+    for required in (
+        "schema_migrations",
+        "sources",
+        "workspaces",
+        "sessions",
+        "source_artifacts",
+        "messages",
+        "message_blocks",
+        "message_fts",
+        "session_tools",
+        "session_files",
+        "projects",
+        "config",
+    ):
         assert required in names, f"missing table {required}"
 
 
@@ -46,4 +57,5 @@ def test_schema_version_seeded(tmp_path):
     init_db(db)
     conn = get_connection(db)
     v = conn.execute("SELECT value FROM config WHERE key='schema_version'").fetchone()[0]
-    assert v == "1"
+    assert v == "2"
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2

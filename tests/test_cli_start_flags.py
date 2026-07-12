@@ -1,4 +1,5 @@
 """Tests for CLI flags on `vg start`."""
+
 import subprocess
 import sys
 
@@ -6,7 +7,8 @@ import sys
 def run(args):
     return subprocess.run(
         [sys.executable, "-m", "vimgym.cli"] + args,
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 

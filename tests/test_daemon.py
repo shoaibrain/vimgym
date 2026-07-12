@@ -1,4 +1,5 @@
 """Integration tests for the full daemon: spawns a real subprocess."""
+
 import shutil
 import socket
 import time
@@ -8,7 +9,7 @@ import httpx
 import pytest
 
 from vimgym.config import AppConfig, SourceConfig, save_config
-from vimgym.daemon import is_running, start_daemon, stop_daemon
+from vimgym.daemon import _server_responding, is_running, start_daemon, stop_daemon
 
 DATA_DIR = Path(__file__).parent / "fixtures" / "sessions" / "-Users-example-edforge"
 
@@ -74,6 +75,7 @@ def test_pid_lifecycle(daemon_cfg):
         time.sleep(0.1)
     assert health is not None, "daemon never responded on /health"
     assert health["status"] == "ok"
+    assert health["pid"] == pid
     # Backfilled the seeded session.
     assert health["sessions"] >= 1
 
@@ -109,6 +111,89 @@ def test_stale_pid_cleared(daemon_cfg):
     assert not cfg.pid_path.exists()
 
 
+def test_start_daemon_does_not_forward_legacy_watch_override(tmp_path, monkeypatch):
+    """The detached child must reload the persisted multi-source v2 config."""
+    cfg = AppConfig(vault_dir=tmp_path / "vault", server_port=7338)
+    cfg.vault_dir.mkdir(parents=True)
+    captured: dict[str, object] = {}
+
+    class Process:
+        pid = 43210
+        returncode = None
+
+        @staticmethod
+        def poll():
+            return None
+
+    def popen(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return Process()
+
+    monkeypatch.setenv("VIMGYM_WATCH_PATH", str(tmp_path / "legacy-override"))
+    monkeypatch.setattr("vimgym.daemon.is_running", lambda _config: False)
+    monkeypatch.setattr("vimgym.daemon._server_responding", lambda _config: True)
+    monkeypatch.setattr("vimgym.daemon.subprocess.Popen", popen)
+
+    assert start_daemon(cfg) == Process.pid
+    child_env = captured["env"]
+    assert isinstance(child_env, dict)
+    assert "VIMGYM_WATCH_PATH" not in child_env
+    assert child_env["VIMGYM_PATH"] == str(cfg.vault_dir)
+
+
+def test_start_daemon_fails_when_exact_child_never_becomes_ready(tmp_path, monkeypatch):
+    cfg = AppConfig(vault_dir=tmp_path / "vault", server_port=7338)
+    cfg.vault_dir.mkdir(parents=True)
+
+    class Process:
+        pid = 43210
+        returncode = None
+        terminated = False
+
+        def poll(self):
+            return 0 if self.terminated else None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            return 0
+
+        def kill(self):
+            self.terminated = True
+
+    process = Process()
+    monkeypatch.setattr("vimgym.daemon.is_running", lambda _config: False)
+    monkeypatch.setattr("vimgym.daemon._server_responding", lambda _config: False)
+    monkeypatch.setattr("vimgym.daemon._STARTUP_TIMEOUT_SECS", 0.0)
+    monkeypatch.setattr("vimgym.daemon.subprocess.Popen", lambda *args, **kwargs: process)
+
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        start_daemon(cfg)
+
+    assert process.terminated is True
+    assert not cfg.pid_path.exists()
+
+
+def test_server_readiness_requires_matching_child_pid(tmp_path, monkeypatch):
+    cfg = AppConfig(vault_dir=tmp_path, server_port=7338)
+    cfg.pid_path.write_text("43210")
+
+    class Response:
+        status_code = 200
+        pid = 99999
+
+        def json(self):
+            return {"status": "ok", "pid": self.pid}
+
+    response = Response()
+    monkeypatch.setattr("httpx.get", lambda *args, **kwargs: response)
+    assert _server_responding(cfg) is False
+
+    response.pid = 43210
+    assert _server_responding(cfg) is True
+
+
 def test_no_duplicate_log_lines(daemon_cfg):
     """Regression test for the daemon double-write logging bug.
 
@@ -134,9 +219,7 @@ def test_no_duplicate_log_lines(daemon_cfg):
 
         assert cfg.log_path.exists(), "log file was not created"
         content = cfg.log_path.read_text(encoding="utf-8", errors="replace")
-        backfill_lines = [
-            ln for ln in content.splitlines() if "backfill processed" in ln
-        ]
+        backfill_lines = [ln for ln in content.splitlines() if "backfill processed" in ln]
         assert len(backfill_lines) == 1, (
             f"Expected exactly 1 'backfill processed' line, got "
             f"{len(backfill_lines)}:\n{backfill_lines}"

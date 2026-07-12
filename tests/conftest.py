@@ -1,4 +1,5 @@
 """Shared pytest fixtures. All tests run against real session files in data/."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -33,6 +33,7 @@ DESIGN NOTES
 - Determinism: the same input always produces the same output, so re-runs
   are no-ops in git.
 """
+
 from __future__ import annotations
 
 import json
@@ -113,9 +114,12 @@ def _scrub_user_content_blocks(content: list, file_counter: dict) -> list:
         elif btype == "image":
             # Keep the structural marker; the parser will strip the source
             # blob anyway. Use a small known media_type so determinism holds.
-            out.append({"type": "image", "source": {
-                "type": "base64", "media_type": "image/png", "data": ""
-            }})
+            out.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": ""},
+                }
+            )
         elif btype == "tool_result":
             new = dict(block)
             inner = block.get("content")
@@ -217,12 +221,10 @@ def _scrub_assistant_content_blocks(content: list, file_counter: dict) -> list:
             new["text"] = _scrub_text(block.get("text", ""))
             out.append(new)
         elif btype == "thinking":
-            new = dict(block)
-            # Parser keeps `type` and stores the cleaned form; the original
-            # text never reaches the FTS index, but we still scrub it for
-            # belt-and-braces safety.
-            new["thinking"] = PLACEHOLDER_THINKING
-            out.append(new)
+            # Signatures can be long provider-authentic opaque payloads. They
+            # are neither parsed nor useful to a fixture, so whitelist only
+            # the visible structural marker.
+            out.append({"type": "thinking", "thinking": PLACEHOLDER_THINKING})
         elif btype == "tool_use":
             new = dict(block)
             new["input"] = _scrub_tool_use_input(
@@ -230,9 +232,12 @@ def _scrub_assistant_content_blocks(content: list, file_counter: dict) -> list:
             )
             out.append(new)
         elif btype == "image":
-            out.append({"type": "image", "source": {
-                "type": "base64", "media_type": "image/png", "data": ""
-            }})
+            out.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/png", "data": ""},
+                }
+            )
         else:
             out.append(block)
     return out
@@ -242,7 +247,7 @@ def _scrub_cwd(cwd: str | None) -> str | None:
     if not isinstance(cwd, str):
         return cwd
     if cwd.startswith(ORIGINAL_CWD_PREFIX):
-        return SAFE_CWD_PREFIX + cwd[len(ORIGINAL_CWD_PREFIX):]
+        return SAFE_CWD_PREFIX + cwd[len(ORIGINAL_CWD_PREFIX) :]
     return cwd
 
 
@@ -330,8 +335,7 @@ def _scrub_obj(obj: dict, file_counter: dict) -> dict:
             tfb = snap.get("trackedFileBackups")
             if isinstance(tfb, dict) and tfb:
                 new_snap["trackedFileBackups"] = {
-                    _scrub_path(path, file_counter): {"version": 1}
-                    for path in tfb.keys()
+                    _scrub_path(path, file_counter): {"version": 1} for path in tfb.keys()
                 }
             else:
                 new_snap["trackedFileBackups"] = {}

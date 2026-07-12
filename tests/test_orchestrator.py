@@ -51,7 +51,11 @@ def test_fts_search_after_backup(tmp_path):
     process_session(DATA_DIR / "3438c55b-0df0-4bc0-811e-561afcf19350.jsonl", cfg)
     conn = get_connection(cfg.db_path)
     results = conn.execute(
-        "SELECT session_uuid FROM sessions_fts WHERE sessions_fts MATCH 'CORS'"
+        """
+        SELECT DISTINCT s.external_session_id session_uuid FROM message_fts f
+        JOIN message_blocks b ON b.rowid=f.rowid
+        JOIN sessions s ON s.id=b.session_id WHERE message_fts MATCH 'CORS'
+        """
     ).fetchall()
     assert len(results) > 0
     assert any("3438c55b" in r["session_uuid"] for r in results)

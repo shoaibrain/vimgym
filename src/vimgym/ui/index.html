@@ -1,126 +1,139 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>vimgym</title>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>vimgym</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#sessionDetail">Skip to session transcript</a>
+  <canvas id="matrix-canvas" aria-hidden="true"></canvas>
 
-<canvas id="matrix-canvas"></canvas>
+  <div class="app">
+    <header class="topbar">
+      <a class="logo" href="/" aria-label="Vimgym home">
+        <span class="logo-vim">vim</span><span class="logo-gym">gym</span>
+        <span class="logo-dot" aria-hidden="true"></span>
+      </a>
 
-<!-- COMMAND PALETTE -->
-<div class="cmd-overlay" id="cmdOverlay">
-  <div class="cmd-palette">
-    <div class="cmd-input-row">
-      <span class="cmd-prompt">/</span>
-      <input class="cmd-input" id="cmdInput" placeholder="search sessions..." autocomplete="off" />
-    </div>
-    <div class="cmd-results" id="cmdResults"></div>
-    <div class="cmd-footer">
-      <span><kbd>↵</kbd> open</span>
-      <span><kbd>↑↓</kbd> navigate</span>
-      <span><kbd>esc</kbd> close</span>
-    </div>
-  </div>
-</div>
+      <button class="search-launcher" id="searchLauncher" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <span aria-hidden="true">⌕</span>
+        <span>Search captured sessions</span>
+        <kbd>⌘K</kbd>
+      </button>
 
-<!-- TOAST -->
-<div class="toast" id="toast"></div>
-
-<!-- APP -->
-<div class="app">
-
-  <!-- TOPBAR -->
-  <header class="topbar">
-    <div class="logo">
-      <span class="logo-vim">vim</span><span class="logo-gym">gym</span>
-      <div class="logo-dot"></div>
-    </div>
-
-    <div class="topbar-search">
-      <span class="search-icon">⌕</span>
-      <input id="topSearch" placeholder="search sessions...  ⌘K" readonly />
-    </div>
-
-    <div class="topbar-actions">
-      <span class="live-dot" id="liveDot">watching</span>
-      <button class="topbar-btn" id="settingsBtn" title="settings">⚙</button>
-    </div>
-  </header>
-
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
-    <div class="sidebar-section">
-      <div class="sidebar-label">Projects</div>
-      <div id="sidebarProjects"></div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-label">Branches</div>
-      <div id="sidebarBranches"></div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-label">Activity — 52 weeks</div>
-      <div class="heatmap">
-        <div class="heatmap-grid" id="heatmap"></div>
+      <div class="topbar-actions">
+        <button class="connection-status" id="connectionStatus" type="button" title="Reconnect live updates">
+          <span class="connection-indicator" aria-hidden="true"></span>
+          <span id="connectionLabel">connecting</span>
+        </button>
+        <button class="icon-button" id="settingsBtn" type="button" aria-label="Open vault settings">⚙</button>
       </div>
-    </div>
+    </header>
 
-    <div class="sidebar-section">
-      <div class="sidebar-label">Vault Stats</div>
-      <div id="sidebarStats"></div>
-    </div>
+    <aside class="sidebar" aria-label="Session filters">
+      <form id="filterForm">
+        <fieldset class="sidebar-section filter-grid">
+          <legend>Capture filters</legend>
 
-    <div class="sidebar-section">
-      <div class="sidebar-label">Tools Used</div>
-      <div class="tool-chip-list" id="sidebarTools"></div>
-    </div>
-  </aside>
+          <label for="providerFilter">Provider</label>
+          <select id="providerFilter" name="provider">
+            <option value="">All providers</option>
+            <option value="claude_code">Claude Code</option>
+            <option value="codex">Codex</option>
+          </select>
 
-  <!-- INBOX -->
-  <main class="inbox">
-    <div class="inbox-header">
-      <span class="inbox-title">Sessions</span>
-      <span class="inbox-count" id="inboxCount">—</span>
-    </div>
-    <div class="inbox-list" id="inboxList"></div>
-  </main>
+          <label for="kindFilter">Session type</label>
+          <select id="kindFilter" name="kind">
+            <option value="">All types</option>
+            <option value="user">User</option>
+            <option value="automation">Automation</option>
+            <option value="subagent">Subagent</option>
+            <option value="unknown">Unknown</option>
+          </select>
 
-  <!-- DETAIL -->
-  <section class="detail" id="detail">
-    <div class="welcome" id="welcome">
-      <div class="welcome-logo">
-        <span class="welcome-vim">vim</span><span class="welcome-gym">gym</span>
+          <label for="lifecycleFilter">Lifecycle</label>
+          <select id="lifecycleFilter" name="lifecycle">
+            <option value="">Active and archived</option>
+            <option value="active">Active</option>
+            <option value="archived">Archived</option>
+          </select>
+
+          <button class="secondary-button" id="clearFilters" type="button">Clear filters</button>
+        </fieldset>
+      </form>
+
+      <section class="sidebar-section" aria-labelledby="sourceHealthHeading">
+        <h2 id="sourceHealthHeading">Source health</h2>
+        <div id="sourceHealth" class="sidebar-stack" aria-live="polite"></div>
+      </section>
+
+      <section class="sidebar-section" aria-labelledby="vaultStatsHeading">
+        <h2 id="vaultStatsHeading">Vault stats</h2>
+        <dl id="sidebarStats" class="stat-list"></dl>
+      </section>
+
+      <section class="sidebar-section" aria-labelledby="toolsHeading">
+        <h2 id="toolsHeading">Tools used</h2>
+        <div id="sidebarTools" class="tool-chip-list"></div>
+      </section>
+    </aside>
+
+    <main class="inbox" aria-labelledby="sessionListHeading">
+      <div class="pane-header">
+        <h1 id="sessionListHeading">Sessions</h1>
+        <span class="inbox-count" id="inboxCount">—</span>
       </div>
-      <div class="glow-line"></div>
-      <div class="welcome-tagline">ai session memory</div>
-      <div class="welcome-hint">
-        Press <kbd>⌘K</kbd> to search · Click a session to read
+      <div class="pane-alert" id="inboxAlert" role="status" hidden></div>
+      <div class="inbox-list" id="inboxList" aria-busy="true"></div>
+      <div class="pane-pagination">
+        <button class="secondary-button" id="loadMoreSessions" type="button" hidden>Load more sessions</button>
       </div>
-    </div>
-  </section>
+    </main>
 
-  <!-- STATUS BAR -->
-  <footer class="statusbar">
-    <span class="sb-mode" id="sbMode">NORMAL</span>
-    <span class="sb-arrow"></span>
-    <span class="sb-segment">⬡ vimgym</span>
-    <span class="sb-segment" id="sbContext">—</span>
-    <span class="sb-segment" id="sbSession"></span>
-    <div class="sb-right">
+    <section class="detail" id="sessionDetail" aria-labelledby="detailHeading" tabindex="-1">
+      <div class="welcome" id="welcome">
+        <div class="welcome-logo" aria-hidden="true">
+          <span class="welcome-vim">vim</span><span class="welcome-gym">gym</span>
+        </div>
+        <div class="glow-line" aria-hidden="true"></div>
+        <h2 id="detailHeading">Provider-neutral AI session memory</h2>
+        <p>Choose a session, or press <kbd>⌘K</kbd> to search across redacted captures.</p>
+      </div>
+    </section>
+
+    <footer class="statusbar">
+      <span class="sb-mode" id="sbMode">NORMAL</span>
+      <span class="sb-segment">⬡ vimgym</span>
+      <span class="sb-segment truncate" id="sbContext">all sessions</span>
+      <span class="sb-segment" id="sbSession"></span>
+      <span class="sb-spacer"></span>
       <span class="sb-segment" id="sbCount">0 sessions</span>
-      <span class="sb-segment" id="sbWatch">watching —</span>
-      <span class="sb-segment">FTS5 ✓</span>
-    </div>
-  </footer>
+      <span class="sb-segment" id="sbWatch">live updates connecting</span>
+      <span class="sb-segment">FTS5</span>
+    </footer>
+  </div>
 
-</div>
+  <div class="command-overlay" id="commandOverlay" hidden>
+    <section class="command-palette" role="dialog" aria-modal="true" aria-labelledby="searchDialogHeading">
+      <h2 class="visually-hidden" id="searchDialogHeading">Search captured sessions</h2>
+      <div class="command-input-row">
+        <span aria-hidden="true">/</span>
+        <label class="visually-hidden" for="commandInput">Search text</label>
+        <input id="commandInput" type="search" role="combobox" aria-autocomplete="list" aria-controls="commandResults" aria-expanded="true" autocomplete="off" placeholder="Search redacted text, tools, and results">
+        <button class="icon-button" id="closeSearch" type="button" aria-label="Close search">×</button>
+      </div>
+      <div class="command-help" id="searchHelp">Use Up and Down to choose a result, then Enter to open it.</div>
+      <div class="command-results" id="commandResults" role="listbox" aria-label="Search results" aria-describedby="searchHelp"></div>
+      <div class="command-footer"><kbd>Enter</kbd> open <kbd>↑↓</kbd> navigate <kbd>Esc</kbd> close</div>
+    </section>
+  </div>
 
-<script src="/vendor/highlight.min.js"></script>
-<script src="/app.js"></script>
+  <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div class="visually-hidden" id="announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="/app.js" defer></script>
 </body>
 </html>

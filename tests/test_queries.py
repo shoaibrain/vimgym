@@ -68,6 +68,11 @@ def test_get_session_unknown(populated):
     assert get_session(populated, "ffffffff") is None
 
 
+@pytest.mark.parametrize("identifier", ["%", "_", "!"])
+def test_get_session_treats_wildcards_as_literals(populated, identifier):
+    assert get_session(populated, identifier) is None
+
+
 def test_get_session_ambiguous_prefix(populated):
     # Single-char prefix '6' will match both 64778c29 and 64b0bec2 and 68568954
     with pytest.raises(AmbiguousIDError):
@@ -77,6 +82,9 @@ def test_get_session_ambiguous_prefix(populated):
 def test_stats(populated):
     stats = get_stats(populated)
     assert stats.total_sessions >= 5
+    assert stats.total_messages > 0
+    assert stats.degraded_sessions == 0
+    assert stats.degraded_artifacts == 0
     assert stats.total_duration_secs > 0
     assert len(stats.top_projects) >= 1
     assert any(p["project_name"] == "edforge" for p in stats.top_projects)

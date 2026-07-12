@@ -1,4 +1,5 @@
-"""Session summarization (heuristic, no external API)."""
+"""Legacy v0.1 summary helper; canonical v2 capture never invokes or stores it."""
+
 from __future__ import annotations
 
 import json
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def heuristic_summary(session: "ParsedSession") -> str:
-    """Brief summary, max 280 chars: title + first prompt + files + tools."""
+    """Build the deprecated v0.1 summary for compatibility tests only."""
     parts: list[str] = []
 
     title = session.ai_title or "Untitled session"

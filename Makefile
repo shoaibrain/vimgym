@@ -3,6 +3,7 @@
 VENV ?= .venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
+DEV_VAULT ?= $(CURDIR)/.vimgym-dev
 
 install: $(VENV)
 	$(PIP) install -e ".[dev]"
@@ -16,7 +17,8 @@ $(VENV):
 	$(PIP) install --upgrade pip
 
 dev:
-	VIMGYM_WATCH_PATH=./data $(VENV)/bin/vg start
+	VIMGYM_PATH=$(DEV_VAULT) VIMGYM_WATCH_PATH=$(CURDIR)/data $(VENV)/bin/vg init
+	VIMGYM_PATH=$(DEV_VAULT) $(VENV)/bin/vg start
 
 test:
 	$(VENV)/bin/pytest -v --tb=short

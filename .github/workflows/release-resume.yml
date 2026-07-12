@@ -1,0 +1,308 @@
+name: resume immutable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated release tag
+        required: true
+        type: string
+      build_run_id:
+        description: Failed release run containing release-dist-TAG
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    name: reuse verified bytes and resume missing targets
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vimgym
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    outputs:
+      pypi_missing: ${{ steps.remote.outputs.pypi_missing }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+      - name: Require the original annotated stable-version tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(git cat-file -t "refs/tags/${TAG}")" = tag
+      - name: Download the original build-once artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.build_run_id }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "release-dist-${{ inputs.tag }}" --dir dist
+          cd dist && sha256sum -c SHA256SUMS
+      - name: Verify manifest still matches the immutable tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          import hashlib, pathlib
+          manifest = json.load(open('dist/release-manifest.json'))
+          commit = subprocess.check_output(['git','rev-list','-n1',os.environ['TAG']], text=True).strip()
+          if manifest['tag'] != os.environ['TAG'] or manifest['commit'] != commit:
+              raise SystemExit('downloaded release artifact does not match tag/commit')
+          actual = {
+              path.name: {
+                  "name": path.name,
+                  "size": path.stat().st_size,
+                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+              }
+              for pattern in ("vimgym-*.whl", "vimgym-*.tar.gz")
+              for path in pathlib.Path("dist").glob(pattern)
+          }
+          declared = {item["name"]: item for item in manifest["files"]}
+          if actual != declared:
+              raise SystemExit("release manifest distribution metadata does not match artifact")
+          PY
+      - id: remote
+        name: Verify existing PyPI bytes or mark PyPI missing
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, urllib.error, urllib.request
+          version = os.environ['TAG'].removeprefix('v')
+          expected = {line.split()[1].lstrip('*'): line.split()[0] for line in pathlib.Path('dist/SHA256SUMS').read_text().splitlines()}
+          try:
+              with urllib.request.urlopen(f'https://pypi.org/pypi/vimgym/{version}/json') as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404: raise
+              actual = {}
+          else:
+              actual = {item['filename']: item['digests']['sha256'] for item in payload['urls']}
+              unexpected = sorted(set(actual) - set(expected))
+              if unexpected:
+                  raise SystemExit(f'unexpected PyPI distribution files: {unexpected}')
+              for name, digest in expected.items():
+                  if name in actual and actual[name] != digest:
+                      raise SystemExit(f'existing PyPI bytes differ for {name}')
+          missing = sorted(set(expected) - set(actual))
+          pathlib.Path('pypi-missing.json').write_text(json.dumps(missing))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write(f'pypi_missing={str(bool(missing)).lower()}\n')
+          PY
+      - name: Create/reuse draft and verify or upload GitHub assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > github-release.json
+          python - <<'PY'
+          import hashlib, json, pathlib
+          paths = [
+              *sorted(pathlib.Path("dist").glob("vimgym-*.whl")),
+              *sorted(pathlib.Path("dist").glob("vimgym-*.tar.gz")),
+              pathlib.Path("dist/SHA256SUMS"),
+              pathlib.Path("dist/release-manifest.json"),
+          ]
+          expected = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in paths
+          }
+          assets = {
+              item["name"]: item.get("digest")
+              for item in json.load(open("github-release.json", encoding="utf-8"))["assets"]
+          }
+          for name in sorted(set(expected) & set(assets)):
+              if assets[name] != f"sha256:{expected[name]}":
+                  raise SystemExit(f"existing GitHub release bytes differ for {name}")
+          pathlib.Path("existing-assets.txt").write_text("\n".join(assets) + "\n")
+          PY
+          for file in dist/vimgym-* dist/SHA256SUMS dist/release-manifest.json; do
+            name=$(basename "$file")
+            if ! grep -Fxq "$name" existing-assets.txt; then
+              gh release upload "$TAG" "$file" --repo "$GITHUB_REPOSITORY"
+            fi
+          done
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > github-release.json
+          python - <<'PY'
+          import hashlib, json, pathlib
+          paths = [
+              *sorted(pathlib.Path("dist").glob("vimgym-*.whl")),
+              *sorted(pathlib.Path("dist").glob("vimgym-*.tar.gz")),
+              pathlib.Path("dist/SHA256SUMS"),
+              pathlib.Path("dist/release-manifest.json"),
+          ]
+          expected = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in paths
+          }
+          assets = {
+              item["name"]: item.get("digest")
+              for item in json.load(open("github-release.json", encoding="utf-8"))["assets"]
+          }
+          for name, digest in expected.items():
+              if assets.get(name) != f"sha256:{digest}":
+                  raise SystemExit(f"GitHub release asset mismatch for {name}")
+          PY
+      - name: Prepare only distributions absent from PyPI
+        if: steps.remote.outputs.pypi_missing == 'true'
+        run: |
+          python - <<'PY'
+          import json, pathlib, shutil
+          destination = pathlib.Path("dist/recovery-pypi")
+          destination.mkdir()
+          for name in json.load(open("pypi-missing.json", encoding="utf-8")):
+              source = pathlib.Path("dist/pypi") / name
+              if not source.is_file():
+                  raise SystemExit(f"original distribution is missing: {name}")
+              shutil.copy2(source, destination / name)
+          PY
+      - name: Publish only original distributions absent from PyPI
+        if: steps.remote.outputs.pypi_missing == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/recovery-pypi/
+          print-hash: true
+          attestations: true
+      - name: Verify complete PyPI bytes after recovery
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, time, urllib.error, urllib.request
+          version = os.environ["TAG"].removeprefix("v")
+          expected = {
+              line.split()[1].lstrip("*"): line.split()[0]
+              for line in pathlib.Path("dist/SHA256SUMS").read_text().splitlines()
+          }
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen(
+                      f"https://pypi.org/pypi/vimgym/{version}/json"
+                  ) as response:
+                      payload = json.load(response)
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404 or attempt == 29:
+                      raise
+              else:
+                  actual = {
+                      item["filename"]: item["digests"]["sha256"]
+                      for item in payload["urls"]
+                  }
+                  if actual == expected:
+                      break
+                  if set(actual) - set(expected):
+                      raise SystemExit("PyPI contains unexpected distribution files")
+                  mismatched = {
+                      name for name in actual
+                      if actual[name] != expected.get(name)
+                  }
+                  if mismatched:
+                      raise SystemExit(f"PyPI byte mismatch: {sorted(mismatched)}")
+              time.sleep(10)
+          else:
+              raise SystemExit("PyPI did not expose every recovered distribution in time")
+          PY
+      - name: Publish recovered GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  homebrew-pr:
+    name: resume verified Homebrew formula PR
+    needs: recover
+    runs-on: ubuntu-24.04
+    steps:
+      - id: existing
+        name: Find an existing formula PR for this version
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh api "repos/shoaibrain/homebrew-vimgym/pulls?state=open&per_page=100" \
+            > homebrew-prs.json
+          python - <<'PY'
+          import json, os
+          version = os.environ["TAG"].removeprefix("v")
+          matches = [
+              str(item["number"])
+              for item in json.load(open("homebrew-prs.json", encoding="utf-8"))
+              if "vimgym" in (item["title"] + " " + item["head"]["ref"]).lower()
+              and version in (item["title"] + " " + item["head"]["ref"])
+          ]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"pr={matches[0] if len(matches) == 1 else ''}\n")
+          PY
+      - name: Open the formula PR when recovery has no existing PR
+        if: steps.existing.outputs.pr == ''
+        uses: dawidd6/action-homebrew-bump-formula@v8
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tap: shoaibrain/vimgym
+          formula: vimgym
+          tag: ${{ inputs.tag }}
+          force: false
+      - id: formula
+        name: Resolve the formula PR
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          EXISTING_PR: ${{ steps.existing.outputs.pr }}
+        run: |
+          if [ -n "$EXISTING_PR" ]; then
+            echo "pr=$EXISTING_PR" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          for attempt in $(seq 1 30); do
+            gh api "repos/shoaibrain/homebrew-vimgym/pulls?state=open&per_page=100" \
+              > homebrew-prs.json
+            PR=$(python - <<'PY'
+          import json, os
+          version = os.environ["TAG"].removeprefix("v")
+          matches = [
+              str(item["number"])
+              for item in json.load(open("homebrew-prs.json", encoding="utf-8"))
+              if "vimgym" in (item["title"] + " " + item["head"]["ref"]).lower()
+              and version in (item["title"] + " " + item["head"]["ref"])
+          ]
+          if len(matches) == 1:
+              print(matches[0])
+          PY
+            )
+            if [ -n "$PR" ]; then
+              echo "pr=$PR" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+      - name: Require the formula PR's macOS install tests
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          PR: ${{ steps.formula.outputs.pr }}
+        run: |
+          for attempt in $(seq 1 30); do
+            COUNT=$(gh pr checks "$PR" --repo shoaibrain/homebrew-vimgym \
+              --json name --jq 'length' 2>/dev/null || true)
+            if [ "${COUNT:-0}" -gt 0 ]; then
+              break
+            fi
+            sleep 10
+          done
+          test "${COUNT:-0}" -gt 0
+          gh pr checks "$PR" --repo shoaibrain/homebrew-vimgym --watch --fail-fast

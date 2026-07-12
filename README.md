@@ -5,116 +5,139 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/shoaibrain/vimgym/actions/workflows/ci.yml/badge.svg)](https://github.com/shoaibrain/vimgym/actions/workflows/ci.yml)
 
-> AI session memory for developers. Local. Fast. No cloud.
+> **Status:** v0.2.0 Beta revival. The project was previously marked inactive after
+> v0.1.1; v0.2 restores active development around capture correctness, privacy,
+> migration, and portable recovery.
 
-Vimgym automatically captures every Claude Code session and makes your entire
-AI conversation history searchable in under 500ms. It's `git log` for your
-AI conversations.
+Vimgym is local session memory for Claude Code and Codex. It continuously turns
+provider session files into one redacted, provider-neutral SQLite/FTS5 vault for
+search, browsing, export, diagnostics, and verified backup/restore. It has no
+hosted service, account, telemetry, or model call.
 
+```text
+~/.claude/projects/**/*.jsonl       $CODEX_HOME/sessions/**/*.jsonl
+Claude subagents + text sidecars    $CODEX_HOME/archived_sessions/**/*.jsonl
+                 \                         /
+                  └── read-only adapters ─┘
+                              │
+                    redact before staging
+                              │
+                     SQLite v2 + block FTS5
+                              │
+                    loopback-only HTTP
 ```
-                  ┌──────────────────────────┐
-                  │   ~/.claude/projects/    │
-                  └────────────┬─────────────┘
-                               │ filesystem watcher
-                               ▼
-            ┌─────────────────────────────────┐
-            │  vimgym daemon (single process) │
-            │  parser → redact → SQLite + FTS5│
-            └────────────┬────────────────────┘
-                         │
-                         ▼
-            ┌────────────────────────────────────┐
-            │  http://127.0.0.1:7337             │
-            │  ⌘K  to search · live updates · WS │
-            └────────────────────────────────────┘
-```
+
+## What v0.2 captures
+
+Vimgym stores redacted user-visible text, tool calls/results, visible provider
+summaries, file activity, metadata, lifecycle, and parent/child lineage. Claude
+root sessions, actual subagent JSONL, referenced text tool-result sidecars, and
+every supported Codex active/archived session are included. Codex sessions are
+classified as user tasks, automations, or subagents.
+
+Binary attachments and images retain metadata only. Hidden or encrypted
+reasoning, provider telemetry, world state, inter-agent transport, and native
+unredacted JSONL are not copied into the vault. Codex memories, logs, goals,
+state/auth databases, and import maps are never scanned.
 
 ## Install
 
-```bash
-# macOS — recommended
-brew tap shoaibrain/vimgym
-brew install vimgym
+The released package remains available from PyPI and Homebrew. For Homebrew 6,
+use the fully qualified formula name:
 
-# Any OS
+```bash
+# macOS
+brew install shoaibrain/vimgym/vimgym
+
+# macOS or Linux
 pipx install vimgym
-
-# One-liner (auto-detects best method)
-curl -fsSL https://vimgym.xyz/install | sh
 ```
 
-After install, run `vg doctor` to verify everything is healthy.
-
-## Quick start
+Then initialize and start the loopback-only daemon:
 
 ```bash
-vg init     # detect AI tool sources, create vault
-vg start    # spawn daemon, open browser
+vg init
+vg doctor
+vg start
 ```
 
-In the browser, press **⌘K** and start typing. Or from the terminal:
+Vimgym targets macOS and Linux with Python 3.11–3.14. A v0.2 release is made
+only after the complete OS/Python matrix passes.
+
+## Search, reindex, and diagnostics
 
 ```bash
-vg search "CORS configuration"
-vg search "auth" --project edforge --since 7d
-vg search "rate limiter" --branch dev --json | jq
+vg search "revision-aware capture"
+vg search "restore" --provider codex --session-type subagent
+vg search "migration" --lifecycle archived --json
+
+vg reindex --provider claude_code
+vg reindex --session SESSION_ID_OR_PREFIX
+
+vg doctor
+vg doctor --json
 ```
 
-## Features
+The browser keeps the existing three-pane identity while adding provider,
+session-kind, lifecycle, lineage, and parser-health context. Search snippets are
+structured text parts rather than HTML, transcripts are paginated, and dynamic
+provider content is rendered with DOM text nodes.
 
-- **Automatic capture** — filesystem watcher catches every new session within seconds; zero configuration
-- **Full-text search** — SQLite FTS5 with BM25 ranking, sub-500ms on any vault size, hyphen-safe queries
-- **Three-pane web UI** — Neon Void design, command palette (⌘K), live updates via WebSocket
-- **Session detail** — full conversation rendering with syntax-highlighted code, collapsible tool blocks, copy buttons
-- **Markdown export** — one click to get a paste-friendly transcript for resuming a session in Claude Code
-- **18-pattern redaction** — strips API keys, AWS credentials, kubeconfig certs, SSH keys, JWT tokens, and more *before* anything is written
-- **Source-aware** — auto-detects Claude Code, Cursor, Copilot, Antigravity, Gemini (only Claude Code parser ships in v1)
-- **Local-first** — server binds 127.0.0.1, vault file is `chmod 600`, zero outbound network calls
+## Portable backup and restore
 
-## CLI
-
+```bash
+vg backup create /Volumes/Backups
+vg backup verify /Volumes/Backups/vimgym-20260101T120000Z-v2.vgbak
+vg backup restore backup.vgbak --to ~/.vimgym-restored
+vg backup restore backup.vgbak --to ~/.vimgym --replace
 ```
-vg start [--no-browser]        Start daemon (watcher + web server), open browser
-vg stop                        Graceful shutdown
-vg status                      Daemon health, vault stats, source list
-vg open                        Open browser if daemon is running
-vg doctor                      Run system diagnostics (Python, FTS5, vault, sources, redaction)
-vg search QUERY [flags]        Terminal search with --project --branch --since --limit --json
-vg init                        Initialize vault, detect AI tool sources
-vg config                      Print active configuration
-vg config sources              List configured sources
-vg config sources ID --enable  Enable a source (takes effect on next vg start)
-vg config sources ID --disable Disable a source
-```
+
+A `.vgbak` is an owner-only ZIP containing a consistent SQLite online snapshot,
+configuration, optional custom redaction rules, and a manifest of sizes and
+SHA-256 hashes. Restore verifies paths, hashes, schema, and SQLite integrity
+before touching the destination. Replacement requires the daemon to be stopped,
+explicit `--replace`, and a rollback backup.
+
+Backups are unencrypted and remain sensitive. Redaction is credential scrubbing,
+not anonymization.
+
+## Upgrade from v0.1.1
+
+The daemon takes an owner-only SQLite rollback snapshot, migrates to schema v2,
+re-redacts legacy content, rebuilds block-level FTS, validates counts and SQLite
+integrity, and only then starts capture and HTTP serving. Source-backed sessions
+are marked for current-parser reconciliation; sessions whose original files are
+missing remain searchable.
+
+The v0.1 provider-native `/raw` endpoint is removed. Use streamed Markdown or
+canonical JSONL export instead. Existing Claude UUID prefixes remain accepted
+during v0.2; ambiguous prefixes return HTTP 409.
+
+## Privacy and local security
+
+- Redaction is recursive and runs before staging, FTS, persistence, diagnostics,
+  APIs, WebSockets, export, and portable backup.
+- An invalid or empty redaction policy fails closed; its deterministic hash
+  forces reindex when rules change.
+- The server accepts only `127.0.0.1`, `localhost`, or `::1`, validates Host and
+  WebSocket Origin, and ships a restrictive self-only Content Security Policy.
+- UI assets and fonts are local. Vimgym makes no outbound network request.
+- Provider files are always read-only.
 
 ## Documentation
 
-- **[User Guide](docs/GUIDE.md)** — installation, UI walkthrough, search syntax, configuration, troubleshooting
-- **[Developer Reference](docs/DEVELOPER.md)** — architecture, module reference, schema, API, source adapter interface
+- [v0.2 architecture and product contract](docs/V0.2-SPEC.md)
+- [User guide](docs/GUIDE.md)
+- [Developer reference](docs/DEVELOPER.md)
+- [Release process](RELEASE.md)
 
-## Status
+## Scope
 
-v0.1.1 — first official release. 117 tests passing on Python 3.11 / 3.12 / 3.13,
-Linux + macOS. Windows and additional source parsers (Cursor, Copilot, Gemini)
-are v2.
-
-## Requirements
-
-- macOS or Linux
-- Python 3.11+
-- Claude Code
-
-## Contributing
-
-```bash
-git clone https://github.com/shoaibrain/vimgym.git
-cd vimgym
-make install        # creates .venv, installs in editable mode with [dev] extras
-source .venv/bin/activate
-make test           # 117 tests, ~40 seconds
-```
-
-See [docs/DEVELOPER.md](docs/DEVELOPER.md) for the architecture overview.
+v0.2 deliberately does not add cloud sync, S3, accounts, team collaboration,
+telemetry, backup encryption, vector search, embeddings, generated summaries,
+tags, cost dashboards, Windows support, provider writeback, or a public plugin
+SDK. Model-assisted intelligence begins only after capture, migration, redaction,
+backup, and provider normalization have proven release evidence.
 
 ## License
 

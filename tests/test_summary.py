@@ -1,3 +1,5 @@
+"""Compatibility checks for the deprecated, non-persisted v0.1 summary helper."""
+
 from pathlib import Path
 
 from vimgym.pipeline.parser import parse_session

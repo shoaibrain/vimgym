@@ -1,0 +1,154 @@
+name: nightly and release-candidate evidence
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-resolutions:
+    name: ${{ matrix.resolution }} dependencies (py${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - resolution: minimum
+            python: "3.11"
+          - resolution: latest
+            python: "3.14"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - name: Install minimum resolution
+        if: matrix.resolution == 'minimum'
+        run: pip install -e ".[dev]" --constraint requirements-min.txt
+      - name: Install latest resolution
+        if: matrix.resolution == 'latest'
+        run: pip install -e ".[dev]" --upgrade
+      - run: python -m pip check
+      - run: pytest -q
+      - run: pip-audit
+
+  scale-benchmark:
+    name: deterministic 100 MiB release budgets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: python tests/_fixture_tools/generate_benchmark.py "$RUNNER_TEMP/corpus"
+      - name: Enforce three cold runs and the median budget
+        run: |
+          mkdir -p "$RUNNER_TEMP/benchmarks"
+          for run in 1 2 3; do
+            python tests/_fixture_tools/benchmark_v02.py \
+              "$RUNNER_TEMP/corpus" "$RUNNER_TEMP/work-$run" \
+              --output "$RUNNER_TEMP/benchmarks/run-$run.json" --enforce
+          done
+          python - <<'PY'
+          import json, os, pathlib, statistics
+          directory = pathlib.Path(os.environ["RUNNER_TEMP"]) / "benchmarks"
+          runs = [json.loads(path.read_text()) for path in sorted(directory.glob("run-*.json"))]
+          cold = [float(run["cold_ingest_seconds"]) for run in runs]
+          median = statistics.median(cold)
+          summary = {"cold_ingest_runs_seconds": cold, "cold_ingest_median_seconds": median}
+          (directory / "summary.json").write_text(
+              json.dumps(summary, indent=2, sort_keys=True) + "\n"
+          )
+          if median > 60:
+              raise SystemExit(f"cold-ingest median {median:.3f}s exceeds 60s")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ github.sha }}
+          path: ${{ runner.temp }}/benchmarks/
+          retention-days: 30
+
+  portable-origin:
+    name: create portable archive (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: python tests/_fixture_tools/generate_benchmark.py "$RUNNER_TEMP/corpus" --sessions 20 --messages 1000 --bytes 5242880
+      - run: python tests/_fixture_tools/benchmark_v02.py "$RUNNER_TEMP/corpus" "$RUNNER_TEMP/work"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/work/backup.vgbak
+          retention-days: 7
+
+  cross-platform-restore:
+    name: ${{ matrix.origin_os }} archive restore (${{ matrix.target_os }})
+    needs: portable-origin
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - origin_os: ubuntu-24.04
+            target_os: macos-14
+          - origin_os: macos-14
+            target_os: ubuntu-24.04
+    runs-on: ${{ matrix.target_os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - uses: actions/download-artifact@v4
+        with:
+          name: portable-${{ matrix.origin_os }}-${{ github.sha }}
+          path: ${{ runner.temp }}
+      - run: vg backup verify "$RUNNER_TEMP/backup.vgbak"
+      - run: vg backup restore "$RUNNER_TEMP/backup.vgbak" --to "$RUNNER_TEMP/restored"
+      - name: Verify restored canonical search results
+        run: |
+          VIMGYM_PATH="$RUNNER_TEMP/restored" \
+            vg search benchmark --json > "$RUNNER_TEMP/restored-search.json"
+          python - <<'PY'
+          import json, os, pathlib
+          path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "restored-search.json"
+          rows = json.loads(path.read_text())
+          if not rows:
+              raise SystemExit("cross-platform restored vault returned no search results")
+          PY
+
+  watcher-reconciliation:
+    name: watcher restart and rewrite reconciliation
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: |
+          for run in 1 2 3; do
+            echo "reconciliation pass $run"
+            pytest -q tests/test_watcher.py tests/test_ingestion_v2.py
+          done

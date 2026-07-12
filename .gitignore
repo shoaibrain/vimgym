@@ -26,6 +26,7 @@ htmlcov/
 
 # Local data fixtures (large, gitignored)
 /data/
+/.vimgym-dev/
 
 # The Homebrew tap is a separate git repo, cloned alongside but not part
 # of this repo. See RELEASE.md.

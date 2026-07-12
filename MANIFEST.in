@@ -3,6 +3,5 @@ include LICENSE
 include CHANGELOG.md
 include pyproject.toml
 recursive-include src/vimgym/ui *.html *.css *.js
-recursive-include src/vimgym/ui/vendor *.js
 recursive-include src/vimgym/defaults *.json
 recursive-include completions _vg

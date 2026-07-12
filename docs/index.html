@@ -4,11 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>vimgym — AI session memory for developers</title>
-<meta name="description" content="git log for your Claude Code conversations. Local. Fast. No cloud.">
+<meta name="description" content="Local redacted search and backup for Claude Code and Codex sessions.">
 <meta property="og:title" content="vimgym">
 <meta property="og:description" content="AI session memory for developers. Local. Fast. No cloud.">
 <meta property="og:url" content="https://vimgym.xyz">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
 <style>
 :root {
   --void-0:    #060608;
@@ -27,7 +26,7 @@
   --text-hi:   #E8E8F0;
   --text-mid:  #8888A0;
   --text-lo:   #44445A;
-  --mono:      'JetBrains Mono', 'Fira Code', monospace;
+  --mono:      ui-monospace, 'SFMono-Regular', Consolas, monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -328,13 +327,13 @@ mark {
     </div>
     <div class="tagline">ai session memory</div>
     <p class="subtagline">
-      <span class="accent">git log</span> for your Claude Code conversations.<br>
-      Local. Fast. No cloud.
+      <span class="accent">git log</span> for Claude Code and Codex sessions.<br>
+      Redacted. Local. Recoverable.
     </p>
     <div class="glow-line"></div>
     <div class="install-box">
       <span class="install-label">install</span>
-      <code><span class="prompt">$</span>brew install vimgym</code>
+      <code><span class="prompt">$</span>brew install shoaibrain/vimgym/vimgym</code>
       <span class="copy-hint">macOS · Linux</span>
     </div>
     <div class="cta-row">
@@ -346,23 +345,24 @@ mark {
   <section id="features">
     <h2>What it does</h2>
     <p class="lead">
-      Every Claude Code session is captured automatically the moment it lands on disk,
-      indexed with full-text search, and made searchable from a local web UI or your
-      terminal. No accounts, no telemetry, no upload. The vault never leaves your machine.
+      Claude Code and Codex sessions are reconciled as they grow, recursively redacted
+      before storage, indexed with block-level full-text search, and available through a
+      local web UI, CLI, streamed export, and verified portable backup. No account,
+      telemetry, model call, or upload.
     </p>
 
     <div class="features" style="margin-top: 24px">
       <div class="feature">
         <h3>⊕ Search</h3>
-        <p>Full-text search across every prompt, response, tool use, and file edit. Find the session where you decided how the auth flow worked.</p>
+        <p>Full-text search across visible redacted prompts, responses, tool calls/results, summaries, and file activity. Find the session where you decided how the auth flow worked.</p>
       </div>
       <div class="feature">
         <h3>⊞ Three-pane UI</h3>
-        <p>Inbox of sessions, sidebar of projects and branches, full conversation rendering with syntax highlighting and copy-to-clipboard.</p>
+        <p>Provider-neutral session inbox, provider/type/lifecycle filters, lineage breadcrumbs, and a bounded, keyboard-accessible transcript.</p>
       </div>
       <div class="feature">
         <h3>● Live capture</h3>
-        <p>A filesystem watcher catches every new session within seconds. Restart your laptop, lose nothing. Sessions persist forever.</p>
+        <p>One bounded watcher queue updates revisions, survives restarts, defers partial writes, and reconciles missed events on startup.</p>
       </div>
     </div>
   </section>
@@ -374,7 +374,7 @@ mark {
     <div class="install-options" style="margin-top: 16px">
       <div class="install-option">
         <h4>homebrew</h4>
-        <pre><span class="prompt">$ </span>brew install vimgym
+        <pre><span class="prompt">$ </span>brew install shoaibrain/vimgym/vimgym
 <span class="prompt">$ </span>vg start</pre>
       </div>
 
@@ -392,39 +392,34 @@ mark {
     </div>
 
     <p style="margin-top:16px;font-size:12px;color:var(--text-lo)">
-      Requires Python 3.11+. macOS and Linux supported. Windows support in v2.
+      v0.2 targets Python 3.11–3.14 on macOS and Linux. Windows is not supported.
     </p>
   </section>
 
   <section id="sources">
     <h2>Sources</h2>
-    <p>vimgym auto-detects every AI coding tool installed on your machine. Only Claude Code has a parser in v1; other tools are detected and listed but disabled until their parser ships.</p>
+    <p>v0.2 intentionally reads only the supported session roots below. Codex memories, logs, goals, state/auth databases, and import maps are excluded.</p>
 
     <div class="sources" style="margin-top: 16px">
       <div class="src-row">
         <span class="src-name">Claude Code</span>
         <span style="color:var(--text-mid)">~/.claude/projects</span>
-        <span class="src-status on">● v1</span>
+        <span class="src-status on">● v0.2</span>
       </div>
       <div class="src-row">
-        <span class="src-name">Cursor</span>
-        <span style="color:var(--text-mid)">~/.cursor</span>
-        <span class="src-status off">○ v2</span>
+        <span class="src-name">Claude subagents + text results</span>
+        <span style="color:var(--text-mid)">projects/**/subagents · tool-results</span>
+        <span class="src-status on">● v0.2</span>
       </div>
       <div class="src-row">
-        <span class="src-name">GitHub Copilot</span>
-        <span style="color:var(--text-mid)">~/.copilot</span>
-        <span class="src-status off">○ v2</span>
+        <span class="src-name">Codex active</span>
+        <span style="color:var(--text-mid)">$CODEX_HOME/sessions</span>
+        <span class="src-status on">● v0.2</span>
       </div>
       <div class="src-row">
-        <span class="src-name">Antigravity</span>
-        <span style="color:var(--text-mid)">~/.antigravity</span>
-        <span class="src-status off">○ v2</span>
-      </div>
-      <div class="src-row">
-        <span class="src-name">Gemini CLI</span>
-        <span style="color:var(--text-mid)">~/.gemini</span>
-        <span class="src-status off">○ v2</span>
+        <span class="src-name">Codex archived</span>
+        <span style="color:var(--text-mid)">$CODEX_HOME/archived_sessions</span>
+        <span class="src-status on">● v0.2</span>
       </div>
     </div>
   </section>
@@ -432,12 +427,13 @@ mark {
   <section>
     <h2>Privacy</h2>
     <p>
-      vimgym binds to <mark>127.0.0.1</mark> only. The vault is a SQLite file at
+      vimgym binds to loopback only (<mark>127.0.0.1</mark>, <mark>localhost</mark>, or <mark>::1</mark>). The vault is a SQLite file at
       <mark>~/.vimgym/vault.db</mark> with <mark>0600</mark> permissions. A built-in
       redaction engine scrubs API keys, AWS credentials, kubeconfig certs, JWT tokens,
       database URLs, PEM blocks, and npm tokens before anything is written.
-      No telemetry. No cloud. No outbound network calls except for the daemon's
-      own filesystem watcher.
+      Invalid policies fail closed. Host and WebSocket Origin are validated and
+      the browser ships a restrictive self-only CSP. No telemetry, cloud, or
+      outbound network calls. Backups are unencrypted and remain sensitive.
     </p>
   </section>
 
@@ -487,7 +483,7 @@ mark {
 // Click-to-copy on the install box
 document.querySelector('.install-box').addEventListener('click', async () => {
   try {
-    await navigator.clipboard.writeText('brew install vimgym');
+    await navigator.clipboard.writeText('brew install shoaibrain/vimgym/vimgym');
     const hint = document.querySelector('.install-box .copy-hint');
     const orig = hint.textContent;
     hint.textContent = 'copied!';

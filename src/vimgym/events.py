@@ -1,8 +1,10 @@
 """Cross-thread event bus: watcher thread → server async websocket broadcast.
 
-A single in-process queue.Queue is fine for v1 (one daemon process,
-one writer thread, many readers). Server polls in a background asyncio task.
+The v0.2 daemon has one ingestion writer and one bounded in-process event queue;
+the server drains it from a background asyncio task. Durable state remains the
+source of truth when transient clients reconnect or the queue coalesces a burst.
 """
+
 from __future__ import annotations
 
 import queue

@@ -1,0 +1,4 @@
+{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"22222222-2222-4222-8222-222222222222","timestamp":"2026-01-01T00:00:00Z","cwd":"/Users/example/repo","originator":"Codex Desktop","source":"vscode","cli_version":"1.0.0","git":{"branch":"main"}}}
+{"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Implement revision-aware capture"}]}}
+{"timestamp":"2026-01-01T00:00:07Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Archived after verification"}]}}
+{"timestamp":"2026-01-01T00:00:08Z","type":"event_msg","payload":{"type":"error","message":"Command failed during local verification","codex_error_info":"other"}}

@@ -27,6 +27,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
+    assert isinstance(body["pid"], int)
     assert body["sessions"] >= 5
 
 
@@ -48,10 +49,10 @@ def test_session_detail(client):
     assert body["session_uuid"] == "eaa3009a-c5ab-4015-a3e5-af26622652f9"
     assert body["ai_title"] is not None
     assert "CloudFormation" in body["ai_title"]
-    assert isinstance(body["messages"], list)
-    assert len(body["messages"]) > 0
-    # content should be parsed JSON, not raw string
-    assert isinstance(body["messages"][0]["content"], list)
+    assert "messages" not in body  # detail is metadata-only in v0.2
+    messages = client.get(f"/api/sessions/{body['id']}/messages").json()["items"]
+    assert len(messages) > 0
+    assert isinstance(messages[0]["blocks"], list)
 
 
 def test_session_detail_404(client):
@@ -98,11 +99,20 @@ def test_stats_endpoint(client):
     assert r.status_code == 200
     body = r.json()
     assert body["total_sessions"] >= 5
+    assert body["total_messages"] > 0
+    assert body["degraded_sessions"] == 0
+    assert body["degraded_artifacts"] == 0
     assert body["total_duration_secs"] > 0
     assert any(t["tool"] == "Bash" for t in body["top_tools"])
 
 
-def test_session_raw(client):
+def test_session_raw_removed(client):
     r = client.get("/api/sessions/eaa3009a/raw")
+    assert r.status_code == 404
+
+
+def test_canonical_jsonl_export_replaces_raw(client):
+    r = client.get("/api/sessions/eaa3009a/export?format=canonical-jsonl")
     assert r.status_code == 200
-    assert "session" in r.text.lower() or len(r.text) > 100
+    assert '"record_type":"session"' in r.text
+    assert '"record_type":"message"' in r.text
